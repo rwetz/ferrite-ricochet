@@ -1,6 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod audio;
+mod benchmark;
 mod physics;
+mod profile;
 mod records;
+mod scene;
 mod table;
 use ferrite_design::prelude::*;
 use gpui::{
@@ -10,10 +14,12 @@ use gpui::{
 use std::time::{Duration, Instant};
 struct Ricochet {
     game: physics::Game,
+    audio: audio::Audio,
     palette: Entity<CommandPalette>,
     focus: FocusHandle,
     charging: bool,
     effects: bool,
+    demo: bool,
     _tick: Task<()>,
     _appearance: Subscription,
 }
@@ -42,10 +48,11 @@ impl Ricochet {
                 last = now;
                 if this
                     .update(cx, |this, cx| {
-                        if this.game.paused {
+                        if this.game.paused && !this.demo {
                             return;
                         }
-                        let active = this.game.live
+                        let active = this.demo
+                            || this.game.live
                             || this.charging
                             || this.game.left
                             || this.game.right
@@ -55,8 +62,35 @@ impl Ricochet {
                         if !active {
                             return;
                         }
+                        if this.demo {
+                            this.game.paused = false;
+                            if !this.game.live {
+                                if this.game.balls == 0 {
+                                    this.game.reset();
+                                }
+                                this.game.charge = 0.7;
+                                this.game.launch();
+                            }
+                            this.game.left = (this.game.time * 2.3).sin() > 0.2;
+                            this.game.right = (this.game.time * 1.9).cos() > 0.1;
+                        }
+                        let previous = (
+                            this.game.hits,
+                            this.game.score,
+                            this.game.balls,
+                            this.game.multiplier,
+                        );
                         let was_live = this.game.live;
                         this.game.tick(dt, this.charging);
+                        if this.game.balls < previous.2 {
+                            this.audio.play(audio::Cue::Drain);
+                        } else if this.game.multiplier > previous.3 {
+                            this.audio.play(audio::Cue::Bank);
+                        } else if this.game.hits > previous.0 {
+                            this.audio.play(audio::Cue::Bumper);
+                        } else if this.game.score > previous.1 {
+                            this.audio.play(audio::Cue::Sling);
+                        }
                         if was_live && !this.game.live {
                             records::save(this.game.best);
                         }
@@ -76,18 +110,27 @@ impl Ricochet {
             ("Pause / resume", 1),
             ("Launch ball", 2),
             ("Toggle impact effects", 3),
+            ("Nudge table", 4),
+            ("Toggle sound", 5),
+            ("Toggle attract mode", 6),
         ] {
             let weak = weak.clone();
             commands.push(command(label).group("Machine").on_run(move |window, cx| {
                 let _ = weak.update(cx, |this, cx| {
                     match action {
-                        0 => this.game.reset(),
+                        0 => {
+                            this.game.reset();
+                            this.demo = false;
+                        }
                         1 => this.game.paused = !this.game.paused,
                         2 => {
                             this.game.paused = false;
                             this.game.launch();
                         }
-                        _ => this.effects = !this.effects,
+                        3 => this.effects = !this.effects,
+                        4 => this.game.nudge(),
+                        5 => this.audio.enabled = !this.audio.enabled,
+                        _ => this.demo = !this.demo,
                     }
                     this.focus.focus(window, cx);
                     cx.notify();
@@ -120,24 +163,43 @@ impl Ricochet {
                 best: records::load(),
                 ..physics::Game::default()
             },
+            audio: audio::Audio {
+                enabled: cfg!(windows) && !profile::enabled(),
+                ..audio::Audio::default()
+            },
             palette,
             focus,
             charging: false,
             effects: true,
+            demo: std::env::args().any(|a| a == "--demo") || profile::enabled(),
             _tick: tick,
             _appearance: theme::follow_system(window),
         }
     }
     fn key(&mut self, key: &str, down: bool, held: bool) {
         match key {
-            "q" => self.game.left = down,
-            "e" => self.game.right = down,
+            "q" => {
+                if down && !held && !self.game.paused {
+                    self.audio.play(audio::Cue::Flipper);
+                }
+                self.game.left = down;
+            }
+            "e" => {
+                if down && !held && !self.game.paused {
+                    self.audio.play(audio::Cue::Flipper);
+                }
+                self.game.right = down;
+            }
             "space" => {
                 if down {
                     self.charging = true;
                 } else {
                     self.charging = false;
+                    let was_live = self.game.live;
                     self.game.launch();
+                    if !was_live && self.game.live {
+                        self.audio.play(audio::Cue::Launch);
+                    }
                 }
             }
             "p" if down && !held => {
@@ -151,6 +213,7 @@ impl Ricochet {
                 self.charging = false;
             }
             "n" if down && !held => self.game.nudge(),
+            "m" if down && !held => self.audio.enabled = !self.audio.enabled,
             "f" if down && !held => self.effects = !self.effects,
             _ => {}
         }
@@ -158,7 +221,7 @@ impl Ricochet {
 }
 impl Render for Ricochet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !window.is_window_active() {
+        if !window.is_window_active() && !self.demo {
             self.game.left = false;
             self.game.right = false;
             self.charging = false;
@@ -169,73 +232,135 @@ impl Render for Ricochet {
         let p = palette(cx);
         let g = &self.game;
         let effects = self.effects && !motion::reduced(cx);
-        let readout = |label: &str, value: String| {
-            ascii_box()
-                .title(label.to_owned())
-                .child(div().display(Scale::X2, window).child(value))
-        };
-        let side =
+        let lights = |values: [bool; 3]| {
             div()
-                .w(px(268.))
-                .flex_shrink_0()
                 .flex()
-                .flex_col()
-                .gap_4()
-                .child(div().display(Scale::X2, window).child("RICOCHET"))
-                .child(
+                .gap_3()
+                .children(values.into_iter().enumerate().map(|(i, on)| {
                     div()
-                        .body(text::SM)
-                        .text_color(hsla(p.fg_dim))
-                        .child("FERROUS PINBALL / MODEL 01"),
-                )
-                .child(readout("SCORE", format!("{:08}", g.score)))
-                .child(readout("HIGH WATER", format!("{:08}", g.best)))
-                .child(
-                    ascii_box().title("CIRCUIT").child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .display(Scale::X1, window)
-                                    .child(format!("BALLS {}  /  {}X", g.balls, g.multiplier)),
-                            )
-                            .child(ascii_gauge(g.charge).label("PLUNGER").cells(12))
-                            .child(div().body(text::SM).child(
-                                "Light all 3 bumpers: +500 and multiplier up. Slings: +25.",
-                            )),
+                        .display(Scale::X1, window)
+                        .text_color(hsla(if on { p.accent_text } else { p.fg_dim }))
+                        .child(format!("[{}{}]", i + 1, if on { "*" } else { "-" }))
+                }))
+        };
+        let side = div()
+            .id("machine-hud")
+            .w(px(280.))
+            .flex_shrink_0()
+            .min_h_0()
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_2()
+            .child(div().display(Scale::X2, window).child("RICOCHET"))
+            .child(
+                div()
+                    .body(text::SM)
+                    .text_color(hsla(p.fg_dim))
+                    .child("FERROUS / SERIES 02"),
+            )
+            .child(ascii_rule(Some("SCORE")))
+            .child(
+                div()
+                    .display(Scale::X3, window)
+                    .text_color(hsla(p.accent_text))
+                    .child(format!("{:08}", g.score)),
+            )
+            .child(
+                div()
+                    .body(text::SM)
+                    .text_color(hsla(p.fg_dim))
+                    .child(format!("BEST  {:08}", g.best)),
+            )
+            .child(div().display(Scale::X1, window).child(format!(
+                "BALL {} / 3       {}X BANK",
+                (4 - g.balls).min(3),
+                g.multiplier
+            )))
+            .child(
+                div()
+                    .display(Scale::X1, window)
+                    .text_color(hsla(if g.combo > 1 { p.accent_text } else { p.fg_dim }))
+                    .child(format!("{}X COMBO     {} HITS", g.combo.max(1), g.hits)),
+            )
+            .child(ascii_rule(Some("CIRCUIT BREAKER")))
+            .child(lights(g.lamps))
+            .child(
+                div()
+                    .body(text::SM)
+                    .text_color(hsla(p.fg_dim))
+                    .child("Bumpers: 100. Complete the bank for +500 and a higher multiplier."),
+            )
+            .child(ascii_rule(Some("RETURN LANES")))
+            .child(lights(g.rollovers))
+            .child(
+                div()
+                    .body(text::SM)
+                    .text_color(hsla(p.fg_dim))
+                    .child("Lanes: 50. Light all three for +250. Chain bumper hits for combos."),
+            )
+            .child(ascii_rule(Some("MACHINE")))
+            .child(ascii_gauge(g.charge).label("PULL").cells(12))
+            .child(ascii_gauge(g.tilt.clamp(0., 1.)).label("TILT").cells(12))
+            .child(
+                div()
+                    .display(Scale::X1, window)
+                    .text_color(hsla(if g.tilt >= 1. {
+                        p.danger
+                    } else if g.save_left > 0. {
+                        p.accent_text
+                    } else {
+                        p.fg_dim
+                    }))
+                    .child(if g.tilt >= 1. {
+                        "TILT / FLIPPERS LOCKED".into()
+                    } else if g.save_left > 0. {
+                        format!("BALL SAVE  {:02}", g.save_left.ceil() as u32)
+                    } else if self.demo {
+                        "ATTRACT MODE".into()
+                    } else if g.paused {
+                        "PAUSED / P TO RESUME".into()
+                    } else {
+                        "Q + E / KEEP IT ALIVE".into()
+                    }),
+            )
+            .child(div().flex_1())
+            .child(div().body(text::SM).text_color(hsla(p.fg_dim)).children([
+                "Q / E    Hold flippers",
+                "SPACE    Pull / release plunger",
+                "N  Nudge   P  Pause   F  Effects",
+                "R  Restart   CTRL SHIFT P  Menu",
+                "M  Sound (Windows)",
+            ]))
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("new-game")
+                            .label("New game")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.game.reset();
+                                this.charging = false;
+                                this.demo = false;
+                                this.focus.focus(window, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("pause")
+                            .label(if g.paused { "Resume" } else { "Pause" })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.game.paused = !this.game.paused;
+                                this.charging = false;
+                                this.game.left = false;
+                                this.game.right = false;
+                                this.focus.focus(window, cx);
+                                cx.notify();
+                            })),
                     ),
-                )
-                .child(ascii_box().title("OPERATOR").child(
-                    div().flex().flex_col().gap_2().body(text::SM).children([
-                        "Q / E    HOLD FLIPPERS",
-                        "SPACE    CHARGE / RELEASE",
-                        "N        NUDGE (WATCH TILT)",
-                        "P        PAUSE",
-                        "R        NEW GAME",
-                        "F        IMPACT EFFECTS",
-                        "CTRL SHIFT P   COMMANDS",
-                    ]),
-                ))
-                .child(
-                    Button::new("new-game")
-                        .label("New game")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.game.reset();
-                            this.focus.focus(window, cx);
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    Button::new("pause")
-                        .label(if g.paused { "Resume" } else { "Pause" })
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.game.paused = !this.game.paused;
-                            this.focus.focus(window, cx);
-                            cx.notify();
-                        })),
-                );
+            );
         let board = div()
             .id("table")
             .relative()
@@ -315,6 +440,22 @@ impl Render for Ricochet {
     }
 }
 fn main() {
+    if std::env::args().any(|a| a == "--scene-snapshot") {
+        benchmark::snapshot();
+        return;
+    }
+    if std::env::args().any(|a| a == "--benchmark") {
+        benchmark::run();
+        return;
+    }
+    let args = std::env::args().collect::<Vec<_>>();
+    if let Some(i) = args.iter().position(|a| a == "--profile") {
+        let path = args
+            .get(i + 1)
+            .expect("--profile requires an output JSON path");
+        profile::configure(path.into());
+    }
+
     if std::env::args().any(|a| a == "--smoke") {
         let mut g = physics::Game {
             charge: 1.,
@@ -342,7 +483,7 @@ fn main() {
         let options = chrome::remembered_window_options(
             "ricochet",
             "Ricochet",
-            size(px(1000.), px(820.)),
+            size(px(1120.), px(860.)),
             cx,
         );
         cx.open_window(options, |window, cx| {

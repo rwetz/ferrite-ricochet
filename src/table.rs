@@ -1,197 +1,171 @@
-use crate::physics::{BUMPERS, Game, V, WALLS};
+use crate::{
+    physics::Game,
+    profile,
+    scene::{self, Camera, Projected},
+};
 use ferrite_design::prelude::*;
-use gpui::{Bounds, Corners, IntoElement, Pixels, RenderImage, Window, canvas, point, px, size};
-use std::{cell::RefCell, sync::Arc};
-thread_local! { static LAST_FRAME: RefCell<Option<Arc<RenderImage>>> = const { RefCell::new(None) }; }
-fn distance(p: V, a: V, b: V) -> f32 {
-    let ab = b - a;
-    let t = ((p - a).dot(ab) / ab.dot(ab)).clamp(0., 1.);
-    (p - a - ab * t).len()
+use gpui::{Bounds, IntoElement, Path, PathBuilder, Pixels, Window, canvas, point, px};
+use std::{cell::RefCell, time::Instant};
+struct Draw {
+    path: Path<Pixels>,
+    ink: usize,
+    depth: f32,
 }
-const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
-// Three-by-five stamped cabinet type, rasterised on the same pixel grid.
-fn stamp(x: usize, y: usize) -> bool {
-    if !(72..136).contains(&x) || !(193..203).contains(&y) {
-        return false;
+struct Cached {
+    key: [f32; 4],
+    camera: Camera,
+    floor: Vec<Draw>,
+    solid: Vec<Draw>,
+}
+thread_local! {static CACHE:RefCell<Option<Cached>>=const{RefCell::new(None)};}
+fn path(f: &Projected, origin: [f32; 2]) -> Path<Pixels> {
+    let mut b = PathBuilder::fill();
+    for (i, p) in f.points.iter().enumerate() {
+        let v = point(px(origin[0] + p[0]), px(origin[1] + p[1]));
+        if i == 0 {
+            b.move_to(v);
+        } else {
+            b.line_to(v);
+        }
     }
-    let col = (x - 72) / 2;
-    let row = (y - 193) / 2;
-    let glyphs: [[u8; 5]; 8] = [
-        [6, 5, 6, 5, 5],
-        [7, 2, 2, 2, 7],
-        [7, 4, 4, 4, 7],
-        [7, 5, 5, 5, 7],
-        [7, 4, 4, 4, 7],
-        [5, 5, 7, 5, 5],
-        [7, 4, 6, 4, 7],
-        [7, 2, 2, 2, 2],
-    ];
-    let local = col % 4;
-    local < 3 && (glyphs[col / 4][row] & (1 << (2 - local))) != 0
+    b.close();
+    b.build().expect("convex mesh face")
+}
+fn floor_batches(faces: &[Projected], origin: [f32; 2]) -> Vec<Draw> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < faces.len() {
+        if !faces[i].floor {
+            i += 1;
+            continue;
+        }
+        let ink = faces[i].ink;
+        let mut b = PathBuilder::fill();
+        while i < faces.len() && faces[i].floor && faces[i].ink == ink {
+            for (j, p) in faces[i].points.iter().enumerate() {
+                let v = point(px(origin[0] + p[0]), px(origin[1] + p[1]));
+                if j == 0 {
+                    b.move_to(v);
+                } else {
+                    b.line_to(v);
+                }
+            }
+            b.close();
+            i += 1;
+        }
+        out.push(Draw {
+            path: b.build().expect("floor mesh"),
+            ink,
+            depth: 0.,
+        });
+    }
+    out
+}
+fn draw(face: &Draw, offset: [f32; 2], colors: &[gpui::Hsla; 13], window: &mut Window) {
+    let mut path = face.path.clone();
+    let delta = point(px(offset[0]), px(offset[1]));
+    path.bounds.origin += delta;
+    for vertex in &mut path.vertices {
+        vertex.xy_position += delta;
+    }
+    window.paint_path(path, colors[face.ink]);
 }
 pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
     let p = palette(cx);
     let colors = [
         hsla(p.sunken),
+        hsla(p.bg),
         hsla(p.surface),
+        hsla(p.raised),
         hsla(p.line),
+        hsla(p.line_strong),
         hsla(p.fg_faint),
         hsla(p.fg_dim),
         hsla(p.fg),
-        hsla(p.accent),
         hsla(p.accent_dim),
-    ]
-    .map(|color| {
-        let c = color.to_rgb();
-        let b = |f: f32| (f.clamp(0., 1.) * 255.).round() as u8;
-        [b(c.b), b(c.g), b(c.r), b(c.a)]
-    });
+        hsla(p.accent),
+        hsla(p.warning),
+        hsla(p.danger),
+    ];
     canvas(
         |_, _, _| {},
-        move |bounds: Bounds<Pixels>, _, window: &mut Window, _| {
-            let scale =
-                (f32::from(bounds.size.width) / 244.).min(f32::from(bounds.size.height) / 380.);
-            let sf = window.scale_factor();
-            let scale = (scale * 0.98).max(0.5);
-            let ox = bounds.left() + px((f32::from(bounds.size.width) - 244. * scale) / 2.);
-            let oy = bounds.top() + px((f32::from(bounds.size.height) - 380. * scale) / 2.);
-            let shake = if effects {
-                (g.time * 95.).sin().signum() * g.shaking * 2.
-            } else {
-                0.
-            };
-            let mut pixels = Vec::with_capacity(244 * 380 * 4);
-            for y in 0..380 {
-                for x in 0..244 {
-                    let color = {
-                        let q = V::new(x as f32 - shake, y as f32 - shake * 0.5);
-                        let threshold = BAYER[y % 4][x % 4];
-                        let mut c = if x % 24 == 0 && y % 24 == 0 { 2 } else { 0 };
-                        // Dithered outer apron and stamped ribs, never a gradient.
-                        if !(18..=224).contains(&x) || !(18..=360).contains(&y) {
-                            c = if threshold < 5 { 2 } else { 1 };
-                        }
-                        if (32..190).contains(&x) && (32..205).contains(&y) && threshold == 0 {
-                            c = 1;
-                        }
-                        for (a, b) in WALLS {
-                            let d = distance(q, a, b);
-                            if d < 2. {
-                                c = 5;
-                            } else if d < 6. {
-                                c = if threshold < 8 { 3 } else { 1 };
-                            }
-                        }
-                        for (i, b) in BUMPERS.iter().enumerate() {
-                            let d = (q - *b).len();
-                            if d < 14. {
-                                c = if d > 11. {
-                                    5
-                                } else if threshold < 7 {
-                                    3
-                                } else {
-                                    1
-                                };
-                                if g.lamps[i] && d < 6. {
-                                    c = 6;
-                                }
-                                if effects
-                                    && g.flash[i] > 0.
-                                    && threshold < (g.flash[i] * 16.) as u8
-                                {
-                                    c = 6;
-                                }
-                            }
-                            if effects && g.flash[i] > 0. {
-                                let r = 19. + (1. - g.flash[i]) * 27.;
-                                if (d - r).abs() < 1. && threshold < 8 {
-                                    c = 6;
-                                }
-                            }
-                        }
-                        for i in 0..2 {
-                            let (a, b) = g.flipper(i);
-                            let d = distance(q, a, b);
-                            if d < 3. {
-                                c = if (i == 0 && g.left) || (i == 1 && g.right) {
-                                    6
-                                } else {
-                                    5
-                                };
-                            } else if d < 5. {
-                                c = 3;
-                            }
-                        }
-                        // Sling plates and three rollover gates.
-                        for (a, b) in [
-                            (V::new(44., 220.), V::new(70., 247.)),
-                            (V::new(179., 220.), V::new(155., 247.)),
-                        ] {
-                            if distance(q, a, b) < 7. && threshold < 9 {
-                                c = 4;
-                            }
-                        }
-                        for i in 0..3 {
-                            if (q.x - (65. + i as f32 * 42.)).abs() < 10. && (42..57).contains(&y) {
-                                c = if x % 3 == 0 { 4 } else { 1 };
-                            }
-                        }
-                        if effects {
-                            for (i, t) in g.trail.iter().enumerate() {
-                                if (q - *t).len() < 2. && threshold < (i + 1) as u8 {
-                                    c = 3;
-                                }
-                            }
-                        }
-                        if stamp(x, y) {
-                            c = 4;
-                        }
-                        let d = (q - g.ball).len();
-                        if d < 4. {
-                            c = if q.x < g.ball.x && q.y < g.ball.y {
-                                5
-                            } else {
-                                6
-                            };
-                        }
-                        if x > 206 && x < 218 && y > 341 && y < 355 {
-                            c = if (y as f32 - 341.) < g.charge * 14. {
-                                6
-                            } else {
-                                3
-                            };
-                        }
-                        c
-                    };
-                    pixels.extend_from_slice(&colors[color]);
+        move |bounds: Bounds<Pixels>, _, window: &mut Window, cx| {
+            let begin = Instant::now();
+            let key = [
+                f32::from(bounds.left()),
+                f32::from(bounds.top()),
+                f32::from(bounds.size.width),
+                f32::from(bounds.size.height),
+            ];
+            let origin = [key[0], key[1]];
+            CACHE.with_borrow_mut(|cache| {
+                if cache.as_ref().is_none_or(|c| c.key != key) {
+                    let camera = Camera::new(key[2], key[3]);
+                    let faces = scene::project_sorted(&camera, &scene::static_table());
+                    let floor = floor_batches(&faces, origin);
+                    let solid = faces
+                        .iter()
+                        .filter(|f| !f.floor)
+                        .map(|f| Draw {
+                            path: path(f, origin),
+                            ink: f.ink,
+                            depth: f.depth,
+                        })
+                        .collect();
+                    *cache = Some(Cached {
+                        key,
+                        camera,
+                        floor,
+                        solid,
+                    });
                 }
-            }
-            let native = image::RgbaImage::from_raw(244, 380, pixels).expect("table raster");
-            let physical_width = (244. * scale * sf).round().max(1.) as u32;
-            let physical_height = (380. * scale * sf).round().max(1.) as u32;
-            let raster = image::imageops::resize(
-                &native,
-                physical_width,
-                physical_height,
-                image::imageops::FilterType::Nearest,
-            );
-            let image = Arc::new(RenderImage::new([image::Frame::new(raster)]));
-            LAST_FRAME.with_borrow_mut(|last| {
-                if let Some(old) = last.replace(image.clone()) {
-                    let _ = window.drop_image(old);
+                let cached = cache.as_ref().unwrap();
+                let offset = if effects {
+                    [
+                        (g.time * 80.).sin().signum() * g.shaking * 4.,
+                        (g.time * 57.).cos().signum() * g.shaking * 2.,
+                    ]
+                } else {
+                    [0.; 2]
+                };
+                for face in &cached.floor {
+                    draw(face, offset, &colors, window);
+                }
+                let dynamic =
+                    scene::project_sorted(&cached.camera, &scene::dynamic_table(&g, effects));
+                let floor = floor_batches(&dynamic, origin);
+                for face in &floor {
+                    draw(face, offset, &colors, window);
+                }
+                let solid = dynamic
+                    .iter()
+                    .filter(|f| !f.floor)
+                    .map(|f| Draw {
+                        path: path(f, origin),
+                        ink: f.ink,
+                        depth: f.depth,
+                    })
+                    .collect::<Vec<_>>();
+                let mut a = 0;
+                let mut b = 0;
+                while a < cached.solid.len() || b < solid.len() {
+                    if b == solid.len()
+                        || (a < cached.solid.len() && cached.solid[a].depth >= solid[b].depth)
+                    {
+                        draw(&cached.solid[a], offset, &colors, window);
+                        a += 1;
+                    } else {
+                        draw(&solid[b], offset, &colors, window);
+                        b += 1;
+                    }
+                }
+                if profile::record(
+                    begin,
+                    cached.floor.len() + floor.len() + cached.solid.len() + solid.len(),
+                ) {
+                    cx.defer(|cx| cx.quit());
                 }
             });
-            let target = Bounds::new(
-                point(
-                    px((f32::from(ox) * sf).round() / sf),
-                    px((f32::from(oy) * sf).round() / sf),
-                ),
-                size(
-                    px(physical_width as f32 / sf),
-                    px(physical_height as f32 / sf),
-                ),
-            );
-            let _ = window.paint_image(target, target, Corners::default(), image, 0, false);
         },
     )
     .size_full()

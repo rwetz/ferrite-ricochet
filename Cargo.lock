@@ -1575,12 +1575,11 @@ dependencies = [
 
 [[package]]
 name = "ferrite-ricochet"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferrite-design",
  "gpui-pre",
  "gpui-pre-platform",
- "image",
  "winresource",
 ]
 

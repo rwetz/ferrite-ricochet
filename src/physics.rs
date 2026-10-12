@@ -71,6 +71,11 @@ pub struct Game {
     pub hits: u32,
     pub multiplier: u64,
     pub lamps: [bool; 3],
+    pub rollovers: [bool; 3],
+    pub lane_flash: [f32; 3],
+    pub combo: u32,
+    pub combo_left: f32,
+    pub save_left: f32,
 }
 impl Default for Game {
     fn default() -> Self {
@@ -96,6 +101,11 @@ impl Default for Game {
             hits: 0,
             multiplier: 1,
             lamps: [false; 3],
+            rollovers: [false; 3],
+            lane_flash: [0.; 3],
+            combo: 0,
+            combo_left: 0.,
+            save_left: 0.,
         }
     }
 }
@@ -110,7 +120,8 @@ impl Game {
             self.vel = V::new(-12., -400. - self.charge * 140.);
             self.live = true;
             self.charge = 0.;
-            self.message = "SHOOT THE BUMPER BANK";
+            self.save_left = 6.;
+            self.message = "BALL SAVE / 6 SECONDS";
         }
     }
     pub fn nudge(&mut self) {
@@ -137,6 +148,14 @@ impl Game {
             return;
         }
         self.time += dt;
+        self.save_left = (self.save_left - dt).max(0.);
+        self.combo_left = (self.combo_left - dt).max(0.);
+        if self.combo_left <= 0. {
+            self.combo = 0;
+        }
+        for f in &mut self.lane_flash {
+            *f = (*f - dt * 2.).max(0.);
+        }
         self.shaking = (self.shaking - dt * 4.).max(0.);
         for f in &mut self.flash {
             *f = (*f - dt * 3.).max(0.);
@@ -159,10 +178,25 @@ impl Game {
         }
         self.vel.y += dt * 260.;
         self.vel = self.vel * (1. - dt * 0.07);
+        let previous_ball = self.ball;
         self.ball = self.ball + self.vel * dt;
         if self.ball.x > 202. && self.ball.y < 68. && self.vel.y < 0. {
-            self.ball = V::new(190., 58.);
             self.vel = V::new(-180., -75.);
+        }
+        if (previous_ball.y - 54.) * (self.ball.y - 54.) < 0. {
+            for i in 0..3 {
+                if (self.ball.x - (65. + i as f32 * 42.)).abs() < 10. && self.lane_flash[i] <= 0. {
+                    self.rollovers[i] = true;
+                    self.lane_flash[i] = 1.;
+                    self.score += 50 * self.multiplier;
+                    self.message = "ROLLOVER / +50";
+                    if self.rollovers.iter().all(|v| *v) {
+                        self.score += 250 * self.multiplier;
+                        self.rollovers = [false; 3];
+                        self.message = "LANES COMPLETE / +250";
+                    }
+                }
+            }
         }
         for (index, (a, b)) in WALLS.into_iter().enumerate() {
             if index == 9 || index == 10 {
@@ -198,7 +232,9 @@ impl Game {
                 self.ball = *c + n * 18.;
                 if self.vel.dot(n) < 0. {
                     self.vel = self.vel - n * (2. * self.vel.dot(n)) + n * 105.;
-                    self.score += 100 * self.multiplier;
+                    self.combo = (self.combo + 1).min(5);
+                    self.combo_left = 2.5;
+                    self.score += 100 * self.multiplier * self.combo as u64;
                     self.hits += 1;
                     self.flash[i] = 1.;
                     self.shaking = 0.65;
@@ -218,7 +254,17 @@ impl Game {
             self.vel = self.vel * (620. / speed);
         }
         self.best = self.best.max(self.score);
+        if self.ball.y > 373. && self.save_left > 0. {
+            self.ball = V::new(212., 329.);
+            self.vel = V::new(-12., -500.);
+            self.save_left = 0.;
+            self.trail.clear();
+            self.message = "BALL SAVED / BACK IN PLAY";
+            return;
+        }
         if self.ball.y > 373. {
+            self.combo = 0;
+            self.combo_left = 0.;
             self.balls = self.balls.saturating_sub(1);
             self.live = false;
             self.ball = V::new(212., 329.);
@@ -287,6 +333,7 @@ mod tests {
         let mut g = Game::default();
         for _ in 0..3 {
             g.launch();
+            g.save_left = 0.;
             g.ball = V::new(112., 380.);
             g.step(1. / 240.);
         }
@@ -343,5 +390,42 @@ mod tests {
             entered |= g.live && g.ball.x < 195.;
         }
         assert!(entered, "even a quick press must feed the table");
+    }
+    #[test]
+    fn early_drain_saves_once() {
+        let mut g = Game::default();
+        g.launch();
+        g.ball = V::new(112., 380.);
+        g.step(1. / 240.);
+        assert_eq!(g.balls, 3);
+        assert!(g.live);
+        assert_eq!(g.save_left, 0.);
+        g.ball = V::new(112., 380.);
+        g.step(1. / 240.);
+        assert_eq!(g.balls, 2);
+    }
+    #[test]
+    fn rollover_crossing_scores_once() {
+        let mut g = Game {
+            live: true,
+            ball: V::new(107., 53.8),
+            vel: V::new(0., 100.),
+            ..Game::default()
+        };
+        g.step(1. / 240.);
+        assert_eq!(g.score, 50);
+        assert!(g.rollovers[1]);
+        g.step(1. / 240.);
+        assert_eq!(g.score, 50);
+    }
+    #[test]
+    fn combo_expires_without_a_hit() {
+        let mut g = Game {
+            combo: 3,
+            combo_left: 0.01,
+            ..Game::default()
+        };
+        g.tick(0.02, false);
+        assert_eq!(g.combo, 0);
     }
 }
