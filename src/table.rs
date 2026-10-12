@@ -52,7 +52,7 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
             let scale =
                 (f32::from(bounds.size.width) / 244.).min(f32::from(bounds.size.height) / 380.);
             let sf = window.scale_factor();
-            let scale = (scale * sf).floor().max(1.) / sf;
+            let scale = (scale * 0.98).max(0.5);
             let ox = bounds.left() + px((f32::from(bounds.size.width) - 244. * scale) / 2.);
             let oy = bounds.top() + px((f32::from(bounds.size.height) - 380. * scale) / 2.);
             let shake = if effects {
@@ -167,11 +167,12 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
                 }
             }
             let native = image::RgbaImage::from_raw(244, 380, pixels).expect("table raster");
-            let physical_scale = (scale * sf).round() as u32;
+            let physical_width = (244. * scale * sf).round().max(1.) as u32;
+            let physical_height = (380. * scale * sf).round().max(1.) as u32;
             let raster = image::imageops::resize(
                 &native,
-                244 * physical_scale,
-                380 * physical_scale,
+                physical_width,
+                physical_height,
                 image::imageops::FilterType::Nearest,
             );
             let image = Arc::new(RenderImage::new([image::Frame::new(raster)]));
@@ -185,7 +186,10 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
                     px((f32::from(ox) * sf).round() / sf),
                     px((f32::from(oy) * sf).round() / sf),
                 ),
-                size(px(244. * scale), px(380. * scale)),
+                size(
+                    px(physical_width as f32 / sf),
+                    px(physical_height as f32 / sf),
+                ),
             );
             let _ = window.paint_image(target, target, Corners::default(), image, 0, false);
         },

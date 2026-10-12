@@ -201,7 +201,7 @@ impl Render for Ricochet {
                                     .display(Scale::X1, window)
                                     .child(format!("BALLS {}  /  {}X", g.balls, g.multiplier)),
                             )
-                            .child(ascii_gauge(g.charge).label("PLUNGER").cells(18))
+                            .child(ascii_gauge(g.charge).label("PLUNGER").cells(12))
                             .child(div().body(text::SM).child(
                                 "Light all 3 bumpers: +500 and multiplier up. Slings: +25.",
                             )),
