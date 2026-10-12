@@ -25,7 +25,9 @@ struct Ricochet {
 }
 impl Drop for Ricochet {
     fn drop(&mut self) {
-        records::save(self.game.best);
+        if !self.demo && !profile::enabled() {
+            records::save(self.game.best);
+        }
     }
 }
 impl Focusable for Ricochet {
@@ -91,7 +93,7 @@ impl Ricochet {
                         } else if this.game.score > previous.1 {
                             this.audio.play(audio::Cue::Sling);
                         }
-                        if was_live && !this.game.live {
+                        if was_live && !this.game.live && !this.demo && !profile::enabled() {
                             records::save(this.game.best);
                         }
                         cx.notify();
@@ -118,11 +120,11 @@ impl Ricochet {
             commands.push(command(label).group("Machine").on_run(move |window, cx| {
                 let _ = weak.update(cx, |this, cx| {
                     match action {
-                        0 => {
-                            this.game.reset();
+                        0 => this.new_game(),
+                        1 => {
                             this.demo = false;
+                            this.game.paused = !this.game.paused;
                         }
-                        1 => this.game.paused = !this.game.paused,
                         2 => {
                             this.game.paused = false;
                             this.game.launch();
@@ -173,6 +175,14 @@ impl Ricochet {
             _appearance: theme::follow_system(window),
         }
     }
+    fn new_game(&mut self) {
+        if self.demo {
+            self.game.best = records::load();
+        }
+        self.game.reset();
+        self.demo = false;
+        self.charging = false;
+    }
     fn key(&mut self, key: &str, down: bool, held: bool) {
         match key {
             "q" => {
@@ -200,15 +210,13 @@ impl Ricochet {
                 }
             }
             "p" if down && !held => {
+                self.demo = false;
                 self.game.paused = !self.game.paused;
                 self.game.left = false;
                 self.game.right = false;
                 self.charging = false;
             }
-            "r" if down && !held => {
-                self.game.reset();
-                self.charging = false;
-            }
+            "r" if down && !held => self.new_game(),
             "n" if down && !held => self.game.nudge(),
             "m" if down && !held => self.audio.enabled = !self.audio.enabled,
             "f" if down && !held => self.effects = !self.effects,
