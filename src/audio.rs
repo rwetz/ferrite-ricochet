@@ -22,6 +22,12 @@ impl Default for Audio {
     }
 }
 impl Audio {
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            ..Self::default()
+        }
+    }
     pub fn play(&mut self, cue: Cue) {
         if !self.enabled {
             return;

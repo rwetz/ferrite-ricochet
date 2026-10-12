@@ -163,10 +163,7 @@ impl Ricochet {
                 best: records::load(),
                 ..physics::Game::default()
             },
-            audio: audio::Audio {
-                enabled: cfg!(windows) && !profile::enabled(),
-                ..audio::Audio::default()
-            },
+            audio: audio::Audio::new(cfg!(windows) && !profile::enabled()),
             palette,
             focus,
             charging: false,
