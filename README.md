@@ -4,7 +4,9 @@ A native Ferrite pinball machine with a perspective 3D cabinet, raised mechanism
 ## Play
 Hold **Q** and **E** for the left and right flippers. Hold **Space** to charge, release to launch. **N** nudges the table; repeated nudges disable flippers through tilt. **P** pauses, **R** starts a new game, **F** toggles impact effects. **M** mutes synthesized mechanical audio on Windows. **Ctrl+Shift+P** opens commands and all ten Ferrite schemes. Click the table to return keyboard focus.
 
-Three balls, with a six-second ball save after each plunge. Bumpers award 100 points, slings 25, return lanes 50. Chain bumper hits within 2.5 seconds for combos up to 5x. Complete the bumper bank for 500 and a higher bank multiplier, or the three lanes for 250. High water is saved locally between sessions.
+Choose a three- or five-ball round in the command menu, with a six-second ball save after each plunge. Bumpers award 100 points, slings 25, return lanes 50. Chain bumper hits within 2.5 seconds for combos up to 5x. Complete the bumper bank for 500 and a higher bank multiplier, or the three lanes for 250. High water is saved locally between sessions.
+
+Ferrite’s sequence: light the bumper bank to open the orbit gate, carry enough momentum through the elevated curved rail, then feed the central reactor scoop. Completing the sequence pays 750 for the orbit and 1,000 for the scoop, then doubles all scoring for 20 seconds. Weak rail shots roll back instead of completing automatically.
 
 ## Install
 Download the Windows setup installer or portable ZIP from Releases. Lodestone discovers this repository through the `ferrite-app` topic and installs its platform archive after checking `SHA256SUMS.txt`.
@@ -24,3 +26,5 @@ Release automation publishes a new patch release on every main push. Releases in
 `ferrite-ricochet --profile profile.json` runs a 20-second silent attract-mode session, writes live CPU paint timings and observed frame cadence after a two-second warmup, then exits. Frame cadence is not a GPU presentation timestamp. `--demo` runs attract mode without exiting; New game returns to manual play.
 
 See [performance and design notes](docs/PERFORMANCE.md) for measurements and their limits.
+
+Board identity, collision geometry, rail sampling and mission rules live in `src/board.rs`. The theme selector resolves a board through `for_scheme`; currently every scheme falls back to the authored Ferrite table. Adding a themed board there will switch geometry and reset the round when its board identity changes. Color-only fallback switches keep the current round.

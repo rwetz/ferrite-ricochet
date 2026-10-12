@@ -1,5 +1,6 @@
 // Frozen native raster workload from 0502877; excludes upscale and GPU upload.
-use crate::physics::{BUMPERS, Game, V, WALLS};
+use crate::board::{BUMPERS, WALLS};
+use crate::physics::{Game, V};
 fn distance(p: V, a: V, b: V) -> f32 {
     let ab = b - a;
     let t = ((p - a).dot(ab) / ab.dot(ab)).clamp(0., 1.);

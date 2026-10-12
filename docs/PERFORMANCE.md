@@ -22,7 +22,12 @@ On this Windows machine, the second candidate measured:
 The render preparation comparison is about 83x faster in this run. This is not an 83x FPS claim. See `benchmark-first.json` and `benchmark-candidate.json` for raw results. Results depend on machine load.
 
 ## Native measurement
+The first native 3D candidate measured 32.47 observed FPS, p95 paint interval 33.76 ms, and p95 table CPU paint time 1.14 ms. That showed that fast render preparation alone did not fix cadence. The background 16 ms timer was replaced with GPUI window-frame callbacks. The final profile is recorded separately below.
+
 The `--profile` mode measures the entire table paint callback, including dynamic tessellation and GPUI path submission, and frame-to-frame paint intervals. It uses a silent scripted 20-second game and discards the first two seconds. These intervals describe app frame cadence, not GPU presentation timestamps. The profile file reports percentiles, outliers and maximum draw count.
 
 ## Boundaries
 This renderer is a fixed-camera 3D mesh renderer inside GPUI, with painter-order visibility rather than a general engine/depth buffer. It preserves the shared Ferrite shell, scheme tokens, pixel type and stepped hit effects. Physical metal highlights come from discrete material roles; there are no texture gradients or full-frame ASCII filters. Mechanical audio currently uses the Windows system mixer; other platform builds retain visual feedback.
+
+## Progressive table pass
+Ferrite now has an elevated sampled Bezier orbit, a physical gate, a staged reactor scoop and a 20-second overdrive. The rail simulation conserves forward/rollback momentum under table gravity and drag. A fast shot completes; a weak one stalls and rolls back. Three- and five-ball rounds are selectable. Other themes currently resolve to the authored Ferrite board, with a stable board-identity/cache seam ready for future layouts.

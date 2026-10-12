@@ -1,6 +1,9 @@
 # Changelog
 
 ## 0.2.0
+- Added progressive bumper-bank/orbit/reactor sequence, inertia-driven elevated rail, weak-shot rollback, overdrive and three/five-ball round selection.
+- Separated board identity from scheme selection for future themed tables.
+- Replaced background timer pacing with native window frame callbacks after live profiling exposed a roughly 32 FPS ceiling.
 - Rebuilt the table as perspective 3D geometry: cabinet, raised rails, bumper stacks, posts, faceted ball and solid flippers.
 - Removed per-frame full-table CPU rasterisation, scaling and GPU texture churn. Static paths are cached and moving mechanisms update independently.
 - Reworked the instrument panel around score, circuits, combo, lane goals, plunger and tilt.

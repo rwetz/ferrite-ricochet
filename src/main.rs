@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod audio;
 mod benchmark;
+mod board;
 mod physics;
 mod profile;
 mod records;
@@ -9,7 +10,7 @@ mod table;
 use ferrite_design::prelude::*;
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement, KeyBinding, Render,
-    Subscription, Task, Window, div, px, size,
+    Subscription, Window, div, px, size,
 };
 use std::time::{Duration, Instant};
 struct Ricochet {
@@ -20,7 +21,8 @@ struct Ricochet {
     charging: bool,
     effects: bool,
     demo: bool,
-    _tick: Task<()>,
+    last_frame: Instant,
+    frame_pending: bool,
     _appearance: Subscription,
 }
 impl Drop for Ricochet {
@@ -39,71 +41,6 @@ impl Ricochet {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        let tick = cx.spawn(async move |this, cx| {
-            let mut last = Instant::now();
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(16))
-                    .await;
-                let now = Instant::now();
-                let dt = now.duration_since(last).as_secs_f32();
-                last = now;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.game.paused && !this.demo {
-                            return;
-                        }
-                        let active = this.demo
-                            || this.game.live
-                            || this.charging
-                            || this.game.left
-                            || this.game.right
-                            || this.game.shaking > 0.
-                            || (this.game.angles[0] - 0.42).abs() > 0.001
-                            || (this.game.angles[1] - (std::f32::consts::PI - 0.42)).abs() > 0.001;
-                        if !active {
-                            return;
-                        }
-                        if this.demo {
-                            this.game.paused = false;
-                            if !this.game.live {
-                                if this.game.balls == 0 {
-                                    this.game.reset();
-                                }
-                                this.game.charge = 0.7;
-                                this.game.launch();
-                            }
-                            this.game.left = (this.game.time * 2.3).sin() > 0.2;
-                            this.game.right = (this.game.time * 1.9).cos() > 0.1;
-                        }
-                        let previous = (
-                            this.game.hits,
-                            this.game.score,
-                            this.game.balls,
-                            this.game.multiplier,
-                        );
-                        let was_live = this.game.live;
-                        this.game.tick(dt, this.charging);
-                        if this.game.balls < previous.2 {
-                            this.audio.play(audio::Cue::Drain);
-                        } else if this.game.multiplier > previous.3 {
-                            this.audio.play(audio::Cue::Bank);
-                        } else if this.game.hits > previous.0 {
-                            this.audio.play(audio::Cue::Bumper);
-                        } else if this.game.score > previous.1 {
-                            this.audio.play(audio::Cue::Sling);
-                        }
-                        if was_live && !this.game.live && !this.demo && !profile::enabled() {
-                            records::save(this.game.best);
-                        }
-                        cx.notify();
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
         let palette = cx.new(|cx| CommandPalette::new(window, cx));
         let weak = cx.weak_entity();
         let mut commands = Vec::new();
@@ -115,6 +52,8 @@ impl Ricochet {
             ("Nudge table", 4),
             ("Toggle sound", 5),
             ("Toggle attract mode", 6),
+            ("New 3-ball round", 7),
+            ("New 5-ball round", 8),
         ] {
             let weak = weak.clone();
             commands.push(command(label).group("Machine").on_run(move |window, cx| {
@@ -132,7 +71,15 @@ impl Ricochet {
                         3 => this.effects = !this.effects,
                         4 => this.game.nudge(),
                         5 => this.audio.enabled = !this.audio.enabled,
-                        _ => this.demo = !this.demo,
+                        6 => this.demo = !this.demo,
+                        7 => {
+                            this.game.set_ball_limit(3);
+                            this.new_game();
+                        }
+                        _ => {
+                            this.game.set_ball_limit(5);
+                            this.new_game();
+                        }
                     }
                     this.focus.focus(window, cx);
                     cx.notify();
@@ -171,8 +118,68 @@ impl Ricochet {
             charging: false,
             effects: true,
             demo: std::env::args().any(|a| a == "--demo") || profile::enabled(),
-            _tick: tick,
+            last_frame: Instant::now(),
+            frame_pending: false,
             _appearance: theme::follow_system(window),
+        }
+    }
+    fn active(&self) -> bool {
+        (!self.game.paused || self.demo)
+            && (self.demo
+                || self.game.live
+                || self.charging
+                || self.game.left
+                || self.game.right
+                || self.game.shaking > 0.
+                || (self.game.angles[0] - 0.42).abs() > 0.001
+                || (self.game.angles[1] - (std::f32::consts::PI - 0.42)).abs() > 0.001)
+    }
+    fn advance(&mut self, dt: f32) {
+        if self.game.paused && !self.demo {
+            return;
+        }
+        let active = self.demo
+            || self.game.live
+            || self.charging
+            || self.game.left
+            || self.game.right
+            || self.game.shaking > 0.
+            || (self.game.angles[0] - 0.42).abs() > 0.001
+            || (self.game.angles[1] - (std::f32::consts::PI - 0.42)).abs() > 0.001;
+        if !active {
+            return;
+        }
+        if self.demo {
+            self.game.paused = false;
+            if !self.game.live {
+                if self.game.balls == 0 {
+                    self.game.reset();
+                }
+                self.game.charge = 0.7;
+                self.game.launch();
+            }
+            self.game.left = (self.game.time * 2.3).sin() > 0.2;
+            self.game.right = (self.game.time * 1.9).cos() > 0.1;
+        }
+        let previous = (
+            self.game.hits,
+            self.game.score,
+            self.game.balls,
+            self.game.multiplier,
+        );
+        let was_live = self.game.live;
+        self.game.tick(dt, self.charging);
+        if self.game.balls < previous.2 {
+            self.audio.play(audio::Cue::Drain);
+        } else if self.game.multiplier > previous.3 {
+            self.audio.play(audio::Cue::Bank);
+        } else if self.game.hits > previous.0 {
+            self.audio.play(audio::Cue::Bumper);
+        } else if self.game.score > previous.1 {
+            self.audio.play(audio::Cue::Sling);
+        }
+        if was_live && !self.game.live && !self.demo && !profile::enabled() {
+            records::save(self.game.best);
         }
     }
     fn new_game(&mut self) {
@@ -234,6 +241,25 @@ impl Render for Ricochet {
                 self.game.paused = true;
             }
         }
+        if self.active() && !self.frame_pending {
+            if self.last_frame.elapsed() > Duration::from_millis(80) {
+                self.last_frame = Instant::now();
+            }
+            self.frame_pending = true;
+            let weak = cx.weak_entity();
+            window.on_next_frame(move |_, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.frame_pending = false;
+                    let now = Instant::now();
+                    let dt = now.duration_since(this.last_frame).as_secs_f32();
+                    this.last_frame = now;
+                    this.advance(dt);
+                    cx.notify();
+                });
+            });
+        }
+        self.game
+            .set_board(board::for_scheme(theme::scheme(cx).key));
         let p = palette(cx);
         let g = &self.game;
         let effects = self.effects && !motion::reduced(cx);
@@ -263,7 +289,7 @@ impl Render for Ricochet {
                 div()
                     .body(text::SM)
                     .text_color(hsla(p.fg_dim))
-                    .child("FERROUS / SERIES 02"),
+                    .child(format!("{} / SERIES 02", g.board.title)),
             )
             .child(ascii_rule(Some("SCORE")))
             .child(
@@ -279,8 +305,9 @@ impl Render for Ricochet {
                     .child(format!("BEST  {:08}", g.best)),
             )
             .child(div().display(Scale::X1, window).child(format!(
-                "BALL {} / 3       {}X BANK",
-                (4 - g.balls).min(3),
+                "BALL {} / {}       {}X BANK",
+                (g.ball_limit + 1 - g.balls).min(g.ball_limit),
+                g.ball_limit,
                 g.multiplier
             )))
             .child(
@@ -289,13 +316,33 @@ impl Render for Ricochet {
                     .text_color(hsla(if g.combo > 1 { p.accent_text } else { p.fg_dim }))
                     .child(format!("{}X COMBO     {} HITS", g.combo.max(1), g.hits)),
             )
+            .child(ascii_rule(Some("SEQUENCE")))
+            .child(
+                div()
+                    .display(Scale::X1, window)
+                    .text_color(hsla(p.accent_text))
+                    .child(board::mission(g.mission).0),
+            )
+            .child(
+                div()
+                    .body(text::SM)
+                    .text_color(hsla(p.fg_dim))
+                    .child(board::mission(g.mission).1),
+            )
+            .when(g.overdrive > 0., |el| {
+                el.child(
+                    div()
+                        .display(Scale::X1, window)
+                        .child(format!("OVERDRIVE / {:02}S", g.overdrive.ceil() as u32)),
+                )
+            })
             .child(ascii_rule(Some("CIRCUIT BREAKER")))
             .child(lights(g.lamps))
             .child(
                 div()
                     .body(text::SM)
                     .text_color(hsla(p.fg_dim))
-                    .child("Bumpers: 100. Complete the bank for +500 and a higher multiplier."),
+                    .child("100 EACH / +500 BANK"),
             )
             .child(ascii_rule(Some("RETURN LANES")))
             .child(lights(g.rollovers))
@@ -303,11 +350,11 @@ impl Render for Ricochet {
                 div()
                     .body(text::SM)
                     .text_color(hsla(p.fg_dim))
-                    .child("Lanes: 50. Light all three for +250. Chain bumper hits for combos."),
+                    .child("50 EACH / +250 BANK"),
             )
             .child(ascii_rule(Some("MACHINE")))
-            .child(ascii_gauge(g.charge).label("PULL").cells(12))
-            .child(ascii_gauge(g.tilt.clamp(0., 1.)).label("TILT").cells(12))
+            .child(ascii_gauge(g.charge).label("PULL").cells(10))
+            .child(ascii_gauge(g.tilt.clamp(0., 1.)).label("TILT").cells(10))
             .child(
                 div()
                     .display(Scale::X1, window)
@@ -346,9 +393,7 @@ impl Render for Ricochet {
                         Button::new("new-game")
                             .label("New game")
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.game.reset();
-                                this.charging = false;
-                                this.demo = false;
+                                this.new_game();
                                 this.focus.focus(window, cx);
                                 cx.notify();
                             })),
@@ -357,6 +402,7 @@ impl Render for Ricochet {
                         Button::new("pause")
                             .label(if g.paused { "Resume" } else { "Pause" })
                             .on_click(cx.listener(|this, _, window, cx| {
+                                this.demo = false;
                                 this.game.paused = !this.game.paused;
                                 this.charging = false;
                                 this.game.left = false;

@@ -33,28 +33,23 @@ impl Mul<f32> for V {
         Self::new(self.x * b, self.y * b)
     }
 }
-pub const BUMPERS: [V; 3] = [V::new(78., 112.), V::new(150., 96.), V::new(120., 161.)];
-pub const WALLS: [(V, V); 12] = [
-    (V::new(22., 330.), V::new(22., 55.)),
-    (V::new(22., 55.), V::new(48., 22.)),
-    (V::new(48., 22.), V::new(185., 22.)),
-    (V::new(185., 22.), V::new(221., 55.)),
-    (V::new(221., 55.), V::new(221., 353.)),
-    (V::new(202., 350.), V::new(202., 91.)),
-    (V::new(202., 91.), V::new(182., 65.)),
-    (V::new(22., 248.), V::new(68., 307.)),
-    (V::new(202., 248.), V::new(158., 307.)),
-    (V::new(43., 220.), V::new(73., 257.)),
-    (V::new(181., 220.), V::new(153., 257.)),
-    (V::new(22., 330.), V::new(66., 356.)),
-];
+
 #[derive(Clone)]
 pub struct Game {
+    pub board: &'static crate::board::Board,
     pub ball: V,
     pub vel: V,
     pub score: u64,
     pub best: u64,
     pub balls: u8,
+    pub ball_limit: u8,
+    pub mission: u8,
+    pub overdrive: f32,
+    pub rail_active: bool,
+    pub rail_distance: f32,
+    pub rail_speed: f32,
+    pub scoop_left: f32,
+    pub completed_cycles: u32,
     pub live: bool,
     pub paused: bool,
     pub left: bool,
@@ -80,11 +75,20 @@ pub struct Game {
 impl Default for Game {
     fn default() -> Self {
         Self {
+            board: &crate::board::FERRITE,
             ball: V::new(212., 329.),
             vel: V::default(),
             score: 0,
             best: 0,
             balls: 3,
+            ball_limit: 3,
+            mission: 0,
+            overdrive: 0.,
+            rail_active: false,
+            rail_distance: 0.,
+            rail_speed: 0.,
+            scoop_left: 0.,
+            completed_cycles: 0,
             live: false,
             paused: false,
             left: false,
@@ -112,8 +116,59 @@ impl Default for Game {
 impl Game {
     pub fn reset(&mut self) {
         let best = self.best;
+        let limit = self.ball_limit;
+        let board = self.board;
         *self = Self::default();
         self.best = best;
+        self.ball_limit = limit;
+        self.balls = limit;
+        self.board = board;
+    }
+    pub fn set_board(&mut self, board: &'static crate::board::Board) {
+        if self.board.key != board.key {
+            self.board = board;
+            self.reset();
+        }
+    }
+    pub fn set_ball_limit(&mut self, limit: u8) {
+        if matches!(limit, 3 | 5) {
+            self.ball_limit = limit;
+            self.reset();
+        }
+    }
+    fn add_score(&mut self, base: u64) {
+        self.score += base * self.multiplier * if self.overdrive > 0. { 2 } else { 1 };
+    }
+    fn rail_step(&mut self, dt: f32) {
+        let rail = self.board.orbit;
+        let (_, tangent) = rail.sample(self.rail_distance);
+        self.rail_speed += 260. * tangent.y * dt;
+        self.rail_speed *= 1. - dt * 0.06;
+        self.rail_distance += self.rail_speed * dt;
+        if self.rail_distance >= rail.length {
+            let (p, t) = rail.sample(rail.length);
+            self.ball = p + t * 8.;
+            self.vel = t * self.rail_speed;
+            self.rail_active = false;
+            if self.mission == 1 {
+                self.mission = 2;
+                self.add_score(750);
+                self.shaking = 0.6;
+                self.message = "ORBIT COMPLETE / REACTOR OPEN";
+            }
+            return;
+        }
+        if self.rail_distance < 0. {
+            let (p, t) = rail.sample(0.);
+            self.ball = p - t * 8.;
+            self.vel = t * self.rail_speed;
+            self.rail_active = false;
+            self.message = "ORBIT REJECTED / BUILD MOMENTUM";
+            return;
+        }
+        let (p, t) = rail.sample(self.rail_distance);
+        self.ball = p;
+        self.vel = t * self.rail_speed;
     }
     pub fn launch(&mut self) {
         if !self.live && self.balls > 0 && !self.paused {
@@ -148,6 +203,15 @@ impl Game {
             return;
         }
         self.time += dt;
+        if self.overdrive > 0. {
+            self.overdrive = (self.overdrive - dt).max(0.);
+            if self.overdrive == 0. {
+                self.mission = 0;
+                self.lamps = [false; 3];
+                self.message = "REACTOR COOLED / BREAK THE BANK";
+            }
+        }
+
         self.save_left = (self.save_left - dt).max(0.);
         self.combo_left = (self.combo_left - dt).max(0.);
         if self.combo_left <= 0. {
@@ -176,6 +240,19 @@ impl Game {
         if !self.live {
             return;
         }
+        if self.scoop_left > 0. {
+            self.scoop_left = (self.scoop_left - dt).max(0.);
+            self.ball = self.board.scoop;
+            if self.scoop_left == 0. {
+                self.vel = V::new(50., 220.);
+                self.overdrive = 20.;
+            }
+            return;
+        }
+        if self.rail_active {
+            self.rail_step(dt);
+            return;
+        }
         self.vel.y += dt * 260.;
         self.vel = self.vel * (1. - dt * 0.07);
         let previous_ball = self.ball;
@@ -188,17 +265,31 @@ impl Game {
                 if (self.ball.x - (65. + i as f32 * 42.)).abs() < 10. && self.lane_flash[i] <= 0. {
                     self.rollovers[i] = true;
                     self.lane_flash[i] = 1.;
-                    self.score += 50 * self.multiplier;
+                    self.add_score(50);
                     self.message = "ROLLOVER / +50";
                     if self.rollovers.iter().all(|v| *v) {
-                        self.score += 250 * self.multiplier;
+                        self.add_score(250);
                         self.rollovers = [false; 3];
                         self.message = "LANES COMPLETE / +250";
                     }
                 }
             }
         }
-        for (index, (a, b)) in WALLS.into_iter().enumerate() {
+        let rail = self.board.orbit;
+        let (entry, tangent) = rail.sample(0.);
+        if self.mission >= 1 && (self.ball - entry).len() < 9. && self.vel.dot(tangent) > 80. {
+            self.rail_active = true;
+            self.rail_distance = 0.;
+            self.rail_speed = self.vel.dot(tangent);
+            self.ball = entry;
+            self.message = "ORBIT / CARRY THE MOMENTUM";
+            return;
+        }
+        if self.mission == 0 {
+            let (a, b) = self.board.gate;
+            self.collide(a, b, 1.5, 0.75, V::default());
+        }
+        for (index, (a, b)) in self.board.walls.iter().copied().enumerate() {
             if index == 9 || index == 10 {
                 let ab = b - a;
                 let t = ((self.ball - a).dot(ab) / ab.dot(ab)).clamp(0., 1.);
@@ -209,7 +300,7 @@ impl Game {
                 let sling = index - 9;
                 if l < 6. && incoming && self.slings[sling] <= 0. {
                     self.vel = self.vel + V::new(if sling == 0 { 95. } else { -95. }, -120.);
-                    self.score += 25 * self.multiplier;
+                    self.add_score(25);
                     self.slings[sling] = 0.15;
                     self.shaking = 0.35;
                     self.message = "SLING / +25";
@@ -224,7 +315,7 @@ impl Game {
             let omega = (self.angles[i] - previous) / dt;
             self.collide(a, b, 3., 0.83, V::new(-arm.y * omega, arm.x * omega));
         }
-        for (i, c) in BUMPERS.iter().enumerate() {
+        for (i, c) in self.board.bumpers.iter().enumerate() {
             let d = self.ball - *c;
             let l = d.len();
             if l < 18. && l > 0.001 {
@@ -234,20 +325,33 @@ impl Game {
                     self.vel = self.vel - n * (2. * self.vel.dot(n)) + n * 105.;
                     self.combo = (self.combo + 1).min(5);
                     self.combo_left = 2.5;
-                    self.score += 100 * self.multiplier * self.combo as u64;
+                    self.add_score(100 * self.combo as u64);
                     self.hits += 1;
                     self.flash[i] = 1.;
                     self.shaking = 0.65;
                     self.lamps[i] = true;
                     self.message = "BUMPER / +100";
                     if self.lamps.iter().all(|x| *x) {
-                        self.score += 500 * self.multiplier;
+                        self.add_score(500);
                         self.multiplier = (self.multiplier + 1).min(5);
                         self.lamps = [false; 3];
                         self.message = "BANK COMPLETE / MULTIPLIER UP";
+                        if self.mission == 0 {
+                            self.mission = 1;
+                            self.message = "BANK COMPLETE / ORBIT GATE OPEN";
+                        }
                     }
                 }
             }
+        }
+        if self.mission == 2 && (self.ball - self.board.scoop).len() < 9. {
+            self.mission = 3;
+            self.scoop_left = 0.8;
+            self.completed_cycles += 1;
+            self.add_score(1000);
+            self.vel = V::default();
+            self.shaking = 0.8;
+            self.message = "REACTOR CAPTURE / OVERDRIVE";
         }
         let speed = self.vel.len();
         if speed > 620. {
@@ -302,6 +406,7 @@ impl Game {
         if charging && !self.live && !self.paused {
             self.charge = (self.charge + dt * 0.8).min(1.);
         }
+        self.best = self.best.max(self.score);
         if self.live {
             self.trail.push(self.ball);
             if self.trail.len() > 12 {
@@ -427,5 +532,66 @@ mod tests {
         };
         g.tick(0.02, false);
         assert_eq!(g.combo, 0);
+    }
+    #[test]
+    fn fast_orbit_unlocks_reactor() {
+        let mut g = Game {
+            live: true,
+            mission: 1,
+            rail_active: true,
+            rail_speed: 550.,
+            ..Game::default()
+        };
+        for _ in 0..1200 {
+            g.step(1. / 240.);
+            if !g.rail_active {
+                break;
+            }
+        }
+        assert_eq!(g.mission, 2);
+        assert!(g.score >= 750);
+    }
+    #[test]
+    fn weak_orbit_rolls_back() {
+        let mut g = Game {
+            live: true,
+            mission: 1,
+            rail_active: true,
+            rail_speed: 110.,
+            ..Game::default()
+        };
+        for _ in 0..1200 {
+            g.step(1. / 240.);
+            if !g.rail_active {
+                break;
+            }
+        }
+        assert!(!g.rail_active);
+        assert_eq!(g.mission, 1);
+        assert_eq!(g.score, 0);
+    }
+    #[test]
+    fn reactor_requires_sequence() {
+        let mut g = Game {
+            live: true,
+            mission: 2,
+            ball: crate::board::FERRITE.scoop,
+            ..Game::default()
+        };
+        g.step(1. / 240.);
+        assert_eq!(g.mission, 3);
+        assert!(g.scoop_left > 0.);
+        for _ in 0..220 {
+            g.step(1. / 240.);
+        }
+        assert!(g.overdrive > 19.);
+    }
+    #[test]
+    fn five_ball_round_survives_reset() {
+        let mut g = Game::default();
+        g.set_ball_limit(5);
+        g.balls = 2;
+        g.reset();
+        assert_eq!(g.balls, 5);
     }
 }

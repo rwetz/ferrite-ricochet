@@ -12,6 +12,7 @@ struct Draw {
     depth: f32,
 }
 struct Cached {
+    board_key: &'static str,
     key: [f32; 4],
     camera: Camera,
     floor: Vec<Draw>,
@@ -99,9 +100,12 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
             ];
             let origin = [key[0], key[1]];
             CACHE.with_borrow_mut(|cache| {
-                if cache.as_ref().is_none_or(|c| c.key != key) {
+                if cache
+                    .as_ref()
+                    .is_none_or(|c| c.key != key || c.board_key != g.board.key)
+                {
                     let camera = Camera::new(key[2], key[3]);
-                    let faces = scene::project_sorted(&camera, &scene::static_table());
+                    let faces = scene::project_sorted(&camera, &scene::static_table(g.board));
                     let floor = floor_batches(&faces, origin);
                     let solid = faces
                         .iter()
@@ -113,6 +117,7 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
                         })
                         .collect();
                     *cache = Some(Cached {
+                        board_key: g.board.key,
                         key,
                         camera,
                         floor,

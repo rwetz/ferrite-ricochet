@@ -20,7 +20,7 @@ fn stats(mut values: Vec<f64>) -> String {
 pub fn run() {
     let camera = Camera::new(900., 900.);
     let start = Instant::now();
-    let static_faces = scene::static_table();
+    let static_faces = scene::static_table(&crate::board::FERRITE);
     let projected = scene::project_sorted(&camera, &static_faces);
     let static_ms = start.elapsed().as_secs_f64() * 1000.;
     black_box(&projected);
@@ -81,7 +81,7 @@ pub fn snapshot() {
         charge: 0.6,
         ..Game::default()
     };
-    let mut faces = scene::static_table();
+    let mut faces = scene::static_table(&crate::board::FERRITE);
     faces.extend(scene::dynamic_table(&g, true));
     let projected = scene::project_sorted(&c, &faces);
     println!("[");

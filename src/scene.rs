@@ -1,5 +1,6 @@
 //! Perspective geometry shared by the live GPU canvas and the CPU benchmark.
-use crate::physics::{BUMPERS, Game, V, WALLS};
+use crate::board::Board;
+use crate::physics::{Game, V};
 use std::f32::consts::{PI, TAU};
 #[derive(Clone, Copy, Debug, Default)]
 pub struct P3 {
@@ -266,7 +267,7 @@ fn lettering(out: &mut Vec<Face>, x: f32, y: f32, s: f32, text: &str, ink: usize
         glyph(out, x + i as f32 * s * 4., y, s, ch, ink);
     }
 }
-pub fn static_table() -> Vec<Face> {
+pub fn static_table(board: &Board) -> Vec<Face> {
     let mut m = Vec::with_capacity(1400);
     // Cabinet: a solid body below the playfield, with a machined lip.
     prism(
@@ -313,17 +314,17 @@ pub fn static_table() -> Vec<Face> {
         let c = V::new(112. + 35. * a.cos(), 198. + 35. * a.sin());
         rect(&mut m, c.x - 1., c.y - 1., 2., 2., 0.4, 5);
     }
-    lettering(&mut m, 65., 190., 3., "RICOCHET", 6);
-    lettering(&mut m, 77., 213., 1.5, "FERROUS", 4);
+    lettering(&mut m, 65., 207., 3., "RICOCHET", 6);
+    lettering(&mut m, 77., 227., 1.5, "FERROUS", 4);
     lettering(&mut m, 47., 338., 1.4, "Q", 7);
     lettering(&mut m, 164., 338., 1.4, "E", 7);
     lettering(&mut m, 91., 285., 1.1, "BALL SAVE", 5);
     // Rails and raised mechanisms follow the same collision geometry as physics.
-    for (a, b) in WALLS {
+    for &(a, b) in board.walls {
         strip(&mut m, a, b, 2.2, 0., 7., 7);
         strip(&mut m, a, b, 0.65, 7.1, 0., 8);
     }
-    for c in BUMPERS {
+    for &c in board.bumpers {
         ring(&mut m, c, 22., 1.2, 0.4, 5);
         cylinder(&mut m, c, 15., 0., 6., 5);
         cylinder(&mut m, c, 11.5, 6., 10., 7);
@@ -387,9 +388,23 @@ pub fn static_table() -> Vec<Face> {
             rect(&mut m, x, y as f32, 4., 1., 10., 4);
         }
     }
+    // Elevated, paired orbit rails. Their sampled curve is shared with the inertia simulation.
+    let rail = board.orbit;
+    for i in 0..rail.points.len() - 1 {
+        let a = rail.points[i];
+        let b = rail.points[i + 1];
+        let d = b - a;
+        let n = V::new(-d.y, d.x) * (1. / d.len());
+        let height = rail.height(rail.distances[i]);
+        for side in [-5., 5.] {
+            strip(&mut m, a + n * side, b + n * side, 0.9, height, 3., 7);
+        }
+    }
+    cylinder(&mut m, board.scoop, 12., 0., 1.5, 5);
+    cylinder(&mut m, board.scoop, 8.5, 1.6, 0.5, 3);
     // Front apron plate and plunger assembly.
-    rect(&mut m, 44., 361., 151., 11., 0.3, 3);
-    lettering(&mut m, 71., 363., 1.3, "MODEL 02", 7);
+    rect(&mut m, 44., 350., 151., 16., 0.3, 3);
+    lettering(&mut m, 71., 354., 1.3, "MODEL 02", 7);
     strip(
         &mut m,
         V::new(212., 348.),
@@ -404,6 +419,36 @@ pub fn static_table() -> Vec<Face> {
 }
 pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
     let mut m = Vec::with_capacity(400);
+    let (a, b) = g.board.gate;
+    let end = if g.mission >= 1 {
+        V::new(a.x, a.y - 17.)
+    } else {
+        b
+    };
+    strip(
+        &mut m,
+        a,
+        end,
+        1.5,
+        0.,
+        8.,
+        if g.mission >= 1 { 10 } else { 8 },
+    );
+    cylinder(
+        &mut m,
+        g.board.scoop,
+        7.,
+        2.2,
+        0.2,
+        if g.mission >= 2 { 0 } else { 5 },
+    );
+    if g.mission >= 2 {
+        ring(&mut m, g.board.scoop, 13., 1.5, 0.5, 10);
+    }
+    if g.overdrive > 0. {
+        ring(&mut m, g.board.scoop, 27., 1., 0.5, 10);
+    }
+
     for i in 0..3 {
         cylinder(
             &mut m,
@@ -424,7 +469,7 @@ pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
     if g.combo > 1 {
         lettering(&mut m, 97., 245., 1.3, &format!("{}X", g.combo), 10);
     }
-    for (i, c) in BUMPERS.iter().enumerate() {
+    for (i, c) in g.board.bumpers.iter().enumerate() {
         cylinder(
             &mut m,
             *c,
@@ -476,7 +521,12 @@ pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
         }
     }
     // A faceted sphere with quantised highlights. Height and perspective are real.
-    let center = P3::new(g.ball.x, g.ball.y, 4.7);
+    let lift = if g.rail_active {
+        g.board.orbit.height(g.rail_distance)
+    } else {
+        0.
+    };
+    let center = P3::new(g.ball.x, g.ball.y, 4.7 + lift);
     let r = 4.;
     for row in 0..5 {
         let latitude = PI * row as f32 / 5.;
@@ -558,7 +608,7 @@ mod tests {
     #[test]
     fn projection_stays_finite_and_in_view() {
         let c = Camera::new(600., 720.);
-        for face in static_table() {
+        for face in static_table(&crate::board::FERRITE) {
             for p in face.points {
                 let (q, _) = c.project(p);
                 assert!(q[0].is_finite() && q[1].is_finite());
