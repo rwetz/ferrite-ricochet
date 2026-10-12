@@ -1,0 +1,12 @@
+[
+{"key":"ferrite","static_faces":3217,"max_dynamic_faces":417,"build_ms":0.46570,"dynamic_prepare":{"mean_ms":0.050738,"p50_ms":0.049400,"p95_ms":0.060300,"p99_ms":0.108500}},
+{"key":"mono","static_faces":3176,"max_dynamic_faces":417,"build_ms":0.40470,"dynamic_prepare":{"mean_ms":0.049000,"p50_ms":0.049100,"p95_ms":0.060600,"p99_ms":0.077500}},
+{"key":"graphite","static_faces":3176,"max_dynamic_faces":417,"build_ms":0.41190,"dynamic_prepare":{"mean_ms":0.048239,"p50_ms":0.048300,"p95_ms":0.063800,"p99_ms":0.078400}},
+{"key":"slate","static_faces":3301,"max_dynamic_faces":417,"build_ms":0.53440,"dynamic_prepare":{"mean_ms":0.037698,"p50_ms":0.035900,"p95_ms":0.049200,"p99_ms":0.058400}},
+{"key":"concrete","static_faces":3190,"max_dynamic_faces":417,"build_ms":0.40810,"dynamic_prepare":{"mean_ms":0.036065,"p50_ms":0.033000,"p95_ms":0.048700,"p99_ms":0.067600}},
+{"key":"harbor","static_faces":3231,"max_dynamic_faces":417,"build_ms":0.43060,"dynamic_prepare":{"mean_ms":0.033856,"p50_ms":0.032700,"p95_ms":0.041500,"p99_ms":0.051300}},
+{"key":"cyanotype","static_faces":3207,"max_dynamic_faces":417,"build_ms":0.45990,"dynamic_prepare":{"mean_ms":0.033367,"p50_ms":0.032800,"p95_ms":0.035800,"p99_ms":0.048600}},
+{"key":"phosphor","static_faces":3264,"max_dynamic_faces":417,"build_ms":0.38720,"dynamic_prepare":{"mean_ms":0.033356,"p50_ms":0.032800,"p95_ms":0.035300,"p99_ms":0.050400}},
+{"key":"verdigris","static_faces":3145,"max_dynamic_faces":417,"build_ms":0.34510,"dynamic_prepare":{"mean_ms":0.032296,"p50_ms":0.032000,"p95_ms":0.034000,"p99_ms":0.042800}},
+{"key":"bruise","static_faces":3168,"max_dynamic_faces":417,"build_ms":0.38510,"dynamic_prepare":{"mean_ms":0.032264,"p50_ms":0.031900,"p95_ms":0.034100,"p99_ms":0.038700}}
+]

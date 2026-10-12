@@ -1,5 +1,5 @@
 use std::ops::{Add, Mul, Sub};
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct V {
     pub x: f32,
     pub y: f32,
@@ -34,6 +34,12 @@ impl Mul<f32> for V {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RailKind {
+    #[default]
+    Orbit,
+    Ramp,
+}
 #[derive(Clone)]
 pub struct Game {
     pub board: &'static crate::board::Board,
@@ -46,6 +52,16 @@ pub struct Game {
     pub mission: u8,
     pub overdrive: f32,
     pub rail_active: bool,
+    pub rail_kind: RailKind,
+    pub drops: [bool; 3],
+    pub target_progress: u8,
+    pub target_flash: [f32; 3],
+    pub target_cooldown: [f32; 3],
+    pub ramp_open: bool,
+    pub ramp_runs: u32,
+    pub jackpot_ready: bool,
+    pub jackpots: u32,
+    pub scoop_rewards_overdrive: bool,
     pub rail_distance: f32,
     pub rail_speed: f32,
     pub scoop_left: f32,
@@ -85,6 +101,16 @@ impl Default for Game {
             mission: 0,
             overdrive: 0.,
             rail_active: false,
+            rail_kind: RailKind::Orbit,
+            drops: [false; 3],
+            target_progress: 0,
+            target_flash: [0.; 3],
+            target_cooldown: [0.; 3],
+            ramp_open: false,
+            ramp_runs: 0,
+            jackpot_ready: false,
+            jackpots: 0,
+            scoop_rewards_overdrive: false,
             rail_distance: 0.,
             rail_speed: 0.,
             scoop_left: 0.,
@@ -139,10 +165,17 @@ impl Game {
     fn add_score(&mut self, base: u64) {
         self.score += base * self.multiplier * if self.overdrive > 0. { 2 } else { 1 };
     }
+    pub fn active_rail(&self) -> &'static std::sync::LazyLock<crate::board::Rail> {
+        match self.rail_kind {
+            RailKind::Orbit => self.board.orbit,
+            RailKind::Ramp => self.board.ramp,
+        }
+    }
     fn rail_step(&mut self, dt: f32) {
-        let rail = self.board.orbit;
+        let rail = self.active_rail();
         let (_, tangent) = rail.sample(self.rail_distance);
-        self.rail_speed += 260. * tangent.y * dt;
+        let slope = rail.slope(self.rail_distance);
+        self.rail_speed += (260. * tangent.y - 620. * slope) / (1. + slope * slope).sqrt() * dt;
         self.rail_speed *= 1. - dt * 0.06;
         self.rail_distance += self.rail_speed * dt;
         if self.rail_distance >= rail.length {
@@ -150,7 +183,16 @@ impl Game {
             self.ball = p + t * 8.;
             self.vel = t * self.rail_speed;
             self.rail_active = false;
-            if self.mission == 1 {
+            if self.rail_kind == RailKind::Ramp {
+                self.ramp_runs += 1;
+                self.add_score(500 + 100 * self.ramp_runs as u64);
+                self.jackpot_ready = true;
+                self.ramp_open = false;
+                self.drops = [false; 3];
+                self.target_progress = 0;
+                self.shaking = 0.7;
+                self.message = "CROSSOVER COMPLETE / JACKPOT LIT";
+            } else if self.mission == 1 {
                 self.mission = 2;
                 self.add_score(750);
                 self.shaking = 0.6;
@@ -163,12 +205,36 @@ impl Game {
             self.ball = p - t * 8.;
             self.vel = t * self.rail_speed;
             self.rail_active = false;
-            self.message = "ORBIT REJECTED / BUILD MOMENTUM";
+            self.message = "RAIL REJECTED / BUILD MOMENTUM";
             return;
         }
         let (p, t) = rail.sample(self.rail_distance);
         self.ball = p;
         self.vel = t * self.rail_speed;
+    }
+    fn target_hit(&mut self, i: usize) {
+        self.target_cooldown[i] = 0.2;
+        self.target_flash[i] = 1.;
+        self.shaking = 0.35;
+        if self.ramp_open {
+            return;
+        }
+        if self.board.order[self.target_progress as usize] == i {
+            self.drops[i] = true;
+            self.target_progress += 1;
+            self.add_score(125);
+            self.message = "TARGET DOWN / KEEP THE SEQUENCE";
+            if self.target_progress == 3 {
+                self.ramp_open = true;
+                self.add_score(400);
+                self.message = "TARGET BANK COMPLETE / CROSSOVER OPEN";
+            }
+        } else {
+            self.drops = [false; 3];
+            self.target_progress = 0;
+            self.target_flash[i] = -1.;
+            self.message = "WRONG TARGET / BANK RESET";
+        }
     }
     pub fn launch(&mut self) {
         if !self.live && self.balls > 0 && !self.paused {
@@ -220,6 +286,16 @@ impl Game {
         for f in &mut self.lane_flash {
             *f = (*f - dt * 2.).max(0.);
         }
+        for f in &mut self.target_flash {
+            *f = if *f < 0. {
+                (*f + dt * 3.).min(0.)
+            } else {
+                (*f - dt * 3.).max(0.)
+            };
+        }
+        for f in &mut self.target_cooldown {
+            *f = (*f - dt).max(0.);
+        }
         self.shaking = (self.shaking - dt * 4.).max(0.);
         for f in &mut self.flash {
             *f = (*f - dt * 3.).max(0.);
@@ -245,7 +321,10 @@ impl Game {
             self.ball = self.board.scoop;
             if self.scoop_left == 0. {
                 self.vel = V::new(50., 220.);
-                self.overdrive = 20.;
+                if self.scoop_rewards_overdrive {
+                    self.overdrive = 20.;
+                    self.scoop_rewards_overdrive = false;
+                }
             }
             return;
         }
@@ -260,18 +339,20 @@ impl Game {
         if self.ball.x > 202. && self.ball.y < 68. && self.vel.y < 0. {
             self.vel = V::new(-180., -75.);
         }
-        if (previous_ball.y - 54.) * (self.ball.y - 54.) < 0. {
-            for i in 0..3 {
-                if (self.ball.x - (65. + i as f32 * 42.)).abs() < 10. && self.lane_flash[i] <= 0. {
-                    self.rollovers[i] = true;
-                    self.lane_flash[i] = 1.;
-                    self.add_score(50);
-                    self.message = "ROLLOVER / +50";
-                    if self.rollovers.iter().all(|v| *v) {
-                        self.add_score(250);
-                        self.rollovers = [false; 3];
-                        self.message = "LANES COMPLETE / +250";
-                    }
+        for i in 0..3 {
+            if (previous_ball.y - self.board.lanes[i].y) * (self.ball.y - self.board.lanes[i].y)
+                < 0.
+                && (self.ball.x - self.board.lanes[i].x).abs() < 10.
+                && self.lane_flash[i] <= 0.
+            {
+                self.rollovers[i] = true;
+                self.lane_flash[i] = 1.;
+                self.add_score(50);
+                self.message = "ROLLOVER / +50";
+                if self.rollovers.iter().all(|v| *v) {
+                    self.add_score(250);
+                    self.rollovers = [false; 3];
+                    self.message = "LANES COMPLETE / +250";
                 }
             }
         }
@@ -279,11 +360,27 @@ impl Game {
         let (entry, tangent) = rail.sample(0.);
         if self.mission >= 1 && (self.ball - entry).len() < 9. && self.vel.dot(tangent) > 80. {
             self.rail_active = true;
+            self.rail_kind = RailKind::Orbit;
             self.rail_distance = 0.;
             self.rail_speed = self.vel.dot(tangent);
             self.ball = entry;
             self.message = "ORBIT / CARRY THE MOMENTUM";
             return;
+        }
+        let ramp = self.board.ramp;
+        let (entry, tangent) = ramp.sample(0.);
+        if self.ramp_open && (self.ball - entry).len() < 9. && self.vel.dot(tangent) > 80. {
+            self.rail_active = true;
+            self.rail_kind = RailKind::Ramp;
+            self.rail_distance = 0.;
+            self.rail_speed = self.vel.dot(tangent);
+            self.ball = entry;
+            self.message = "CROSSOVER / CLIMB THE CREST";
+            return;
+        }
+        if !self.ramp_open {
+            let (a, b) = self.board.ramp_gate;
+            self.collide(a, b, 1.5, 0.75, V::default());
         }
         if self.mission == 0 {
             let (a, b) = self.board.gate;
@@ -307,6 +404,23 @@ impl Game {
                 }
             } else {
                 self.collide(a, b, 2., 0.82, V::default());
+            }
+        }
+        for i in 0..3 {
+            if self.drops[i] {
+                continue;
+            }
+            let target = self.board.targets[i];
+            let side = V::new(target.normal.y, -target.normal.x);
+            let a = target.center - side * 5.;
+            let b = target.center + side * 5.;
+            let ab = b - a;
+            let t = ((self.ball - a).dot(ab) / ab.dot(ab)).clamp(0., 1.);
+            let d = self.ball - (a + ab * t);
+            let incoming = self.vel.dot(target.normal) < -10. && d.dot(target.normal) > 0.;
+            self.collide(a, b, 1.5, 0.85, V::default());
+            if d.len() < 5.5 && incoming && self.target_cooldown[i] <= 0. {
+                self.target_hit(i);
             }
         }
         for (i, previous) in old.iter().enumerate() {
@@ -344,9 +458,20 @@ impl Game {
                 }
             }
         }
+        if self.jackpot_ready && (self.ball - self.board.scoop).len() < 9. {
+            self.add_score(2500 + 500 * self.ramp_runs as u64);
+            self.jackpots += 1;
+            self.jackpot_ready = false;
+            self.scoop_left = 0.6;
+            self.scoop_rewards_overdrive = false;
+            self.vel = V::default();
+            self.shaking = 1.;
+            self.message = "JACKPOT / REACTOR CAPTURE";
+        }
         if self.mission == 2 && (self.ball - self.board.scoop).len() < 9. {
             self.mission = 3;
             self.scoop_left = 0.8;
+            self.scoop_rewards_overdrive = true;
             self.completed_cycles += 1;
             self.add_score(1000);
             self.vel = V::default();
@@ -593,5 +718,117 @@ mod tests {
         g.balls = 2;
         g.reset();
         assert_eq!(g.balls, 5);
+    }
+    #[test]
+    fn ordered_targets_open_ramp_and_wrong_shots_reset() {
+        for board in crate::board::ALL {
+            let mut g = Game {
+                board,
+                ..Game::default()
+            };
+            g.target_hit(board.order[0]);
+            assert_eq!(g.target_progress, 1);
+            g.target_hit(board.order[2]);
+            assert_eq!(g.target_progress, 0);
+            assert_eq!(g.drops, [false; 3]);
+            for i in board.order {
+                g.target_hit(i);
+            }
+            assert!(g.ramp_open);
+            assert_eq!(g.drops, [true; 3]);
+        }
+    }
+    #[test]
+    fn target_requires_actual_front_contact() {
+        let board = &crate::board::FERRITE;
+        let p = board.targets[board.order[0]].center;
+        let mut g = Game {
+            live: true,
+            ball: p + V::new(0., 4.8),
+            vel: V::new(0., -150.),
+            ..Game::default()
+        };
+        g.step(1. / 240.);
+        assert_eq!(g.target_progress, 1);
+    }
+    #[test]
+    fn ramps_require_inertia_and_light_jackpot() {
+        for board in crate::board::ALL {
+            let mut g = Game {
+                board,
+                live: true,
+                ramp_open: true,
+                rail_active: true,
+                rail_kind: RailKind::Ramp,
+                rail_speed: 590.,
+                ..Game::default()
+            };
+            for _ in 0..1800 {
+                g.step(1. / 240.);
+                if !g.rail_active {
+                    break;
+                }
+            }
+            assert!(!g.rail_active, "{}: rail trapped a fast shot", board.key);
+            assert!(
+                g.jackpot_ready,
+                "{}: full-speed shot cannot finish",
+                board.key
+            );
+            assert_eq!(g.ramp_runs, 1);
+            let mut slow = Game {
+                board,
+                live: true,
+                ramp_open: true,
+                rail_active: true,
+                rail_kind: RailKind::Ramp,
+                rail_speed: 100.,
+                ..Game::default()
+            };
+            for _ in 0..1200 {
+                slow.step(1. / 240.);
+                if !slow.rail_active {
+                    break;
+                }
+            }
+            assert!(!slow.jackpot_ready);
+            assert_eq!(slow.ramp_runs, 0);
+        }
+    }
+    #[test]
+    fn jackpot_capture_does_not_bypass_overdrive_sequence() {
+        let mut g = Game {
+            live: true,
+            jackpot_ready: true,
+            ramp_runs: 1,
+            ball: crate::board::FERRITE.scoop,
+            ..Game::default()
+        };
+        g.step(1. / 240.);
+        assert_eq!(g.jackpots, 1);
+        assert!(g.scoop_left > 0.);
+        for _ in 0..200 {
+            g.step(1. / 240.);
+        }
+        assert_eq!(g.overdrive, 0.);
+        assert_eq!(g.mission, 0);
+    }
+    #[test]
+    fn switch_resets_round_and_preserves_selected_limit_and_best() {
+        let mut g = Game {
+            score: 900,
+            best: 1200,
+            ball_limit: 5,
+            mission: 2,
+            ramp_open: true,
+            ..Game::default()
+        };
+        g.set_board(&crate::board::MONO);
+        assert_eq!(g.board.key, "mono");
+        assert_eq!(g.score, 0);
+        assert_eq!(g.balls, 5);
+        assert_eq!(g.best, 1200);
+        assert_eq!(g.mission, 0);
+        assert!(!g.ramp_open);
     }
 }

@@ -21,14 +21,15 @@ struct Ricochet {
     charging: bool,
     effects: bool,
     demo: bool,
+    record_valid: bool,
     last_frame: Instant,
     frame_pending: bool,
     _appearance: Subscription,
 }
 impl Drop for Ricochet {
     fn drop(&mut self) {
-        if !self.demo && !profile::enabled() {
-            records::save(self.game.best);
+        if self.record_valid && !profile::enabled() {
+            records::save(self.game.board, self.game.best);
         }
     }
 }
@@ -39,6 +40,8 @@ impl Focusable for Ricochet {
 }
 impl Ricochet {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let initial_board = board::for_scheme(theme::scheme(cx).key);
+        let demo = std::env::args().any(|a| a == "--demo") || profile::enabled();
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         let palette = cx.new(|cx| CommandPalette::new(window, cx));
@@ -71,7 +74,12 @@ impl Ricochet {
                         3 => this.effects = !this.effects,
                         4 => this.game.nudge(),
                         5 => this.audio.enabled = !this.audio.enabled,
-                        6 => this.demo = !this.demo,
+                        6 => {
+                            this.demo = !this.demo;
+                            if this.demo {
+                                this.record_valid = false;
+                            }
+                        }
                         7 => {
                             this.game.set_ball_limit(3);
                             this.new_game();
@@ -88,9 +96,13 @@ impl Ricochet {
         }
         for scheme in SCHEMES {
             commands.push(
-                command(format!("Scheme: {}", scheme.name))
-                    .group("Appearance")
-                    .on_run(move |_, cx| theme::set_scheme(scheme, cx)),
+                command(format!(
+                    "Map: {} / {}",
+                    board::for_scheme(scheme.key).title,
+                    scheme.name
+                ))
+                .group("Tables")
+                .on_run(move |_, cx| theme::set_scheme(scheme, cx)),
             );
         }
         commands.push(
@@ -109,7 +121,8 @@ impl Ricochet {
         focus.focus(window, cx);
         Self {
             game: physics::Game {
-                best: records::load(),
+                board: initial_board,
+                best: records::load(initial_board),
                 ..physics::Game::default()
             },
             audio: audio::Audio::new(cfg!(windows) && !profile::enabled()),
@@ -117,7 +130,8 @@ impl Ricochet {
             focus,
             charging: false,
             effects: true,
-            demo: std::env::args().any(|a| a == "--demo") || profile::enabled(),
+            demo,
+            record_valid: !demo,
             last_frame: Instant::now(),
             frame_pending: false,
             _appearance: theme::follow_system(window),
@@ -166,31 +180,64 @@ impl Ricochet {
             self.game.score,
             self.game.balls,
             self.game.multiplier,
+            self.game.mission,
+            self.game.ramp_runs,
+            self.game.jackpots,
         );
         let was_live = self.game.live;
         self.game.tick(dt, self.charging);
         if self.game.balls < previous.2 {
             self.audio.play(audio::Cue::Drain);
-        } else if self.game.multiplier > previous.3 {
+        } else if self.game.multiplier > previous.3
+            || self.game.mission > previous.4
+            || self.game.ramp_runs > previous.5
+            || self.game.jackpots > previous.6
+        {
             self.audio.play(audio::Cue::Bank);
         } else if self.game.hits > previous.0 {
             self.audio.play(audio::Cue::Bumper);
         } else if self.game.score > previous.1 {
             self.audio.play(audio::Cue::Sling);
         }
-        if was_live && !self.game.live && !self.demo && !profile::enabled() {
-            records::save(self.game.best);
+        if was_live && !self.game.live && self.record_valid && !profile::enabled() {
+            records::save(self.game.board, self.game.best);
         }
     }
-    fn new_game(&mut self) {
-        if self.demo {
-            self.game.best = records::load();
+    fn sync_table(&mut self, spec: &'static board::Board) {
+        if self.game.board.key != spec.key {
+            if self.record_valid && !profile::enabled() {
+                records::save(self.game.board, self.game.best);
+            }
+            self.game.set_board(spec);
+            self.game.best = records::load(spec);
+            self.charging = false;
         }
+    }
+    fn cycle_table(&mut self, direction: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let index = SCHEMES
+            .iter()
+            .position(|s| s.key == self.game.board.key)
+            .unwrap_or(0);
+        let next = (index as isize + direction).rem_euclid(SCHEMES.len() as isize) as usize;
+        theme::set_scheme(&SCHEMES[next], cx);
+        self.sync_table(board::for_scheme(SCHEMES[next].key));
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+    fn new_game(&mut self) {
+        if self.record_valid && !profile::enabled() {
+            records::save(self.game.board, self.game.best);
+        }
+        self.game.best = records::load(self.game.board);
         self.game.reset();
         self.demo = false;
+        self.record_valid = !profile::enabled();
         self.charging = false;
     }
     fn key(&mut self, key: &str, down: bool, held: bool) {
+        if self.demo && down && !held && matches!(key, "q" | "e" | "space" | "r" | "n") {
+            self.new_game();
+        }
         match key {
             "q" => {
                 if down && !held && !self.game.paused {
@@ -208,9 +255,12 @@ impl Ricochet {
                 if down {
                     self.charging = true;
                 } else {
+                    let charged = self.charging;
                     self.charging = false;
                     let was_live = self.game.live;
-                    self.game.launch();
+                    if charged {
+                        self.game.launch();
+                    }
                     if !was_live && self.game.live {
                         self.audio.play(audio::Cue::Launch);
                     }
@@ -241,6 +291,7 @@ impl Render for Ricochet {
                 self.game.paused = true;
             }
         }
+        self.sync_table(board::for_scheme(theme::scheme(cx).key));
         if self.active() && !self.frame_pending {
             if self.last_frame.elapsed() > Duration::from_millis(80) {
                 self.last_frame = Instant::now();
@@ -258,8 +309,6 @@ impl Render for Ricochet {
                 });
             });
         }
-        self.game
-            .set_board(board::for_scheme(theme::scheme(cx).key));
         let p = palette(cx);
         let g = &self.game;
         let effects = self.effects && !motion::reduced(cx);
@@ -312,13 +361,13 @@ impl Render for Ricochet {
                 div()
                     .display(Scale::X1, window)
                     .text_color(hsla(p.accent_text))
-                    .child(board::mission(g.mission).0),
+                    .child(board::mission(g.board, g.mission).0),
             )
             .child(
                 div()
                     .body(text::SM)
                     .text_color(hsla(p.fg_dim))
-                    .child(board::mission(g.mission).1),
+                    .child(board::mission(g.board, g.mission).1),
             )
             .when(g.overdrive > 0., |el| {
                 el.child(
@@ -327,6 +376,44 @@ impl Render for Ricochet {
                         .child(format!("OVERDRIVE / {:02}S", g.overdrive.ceil() as u32)),
                 )
             })
+            .child(ascii_rule(Some("CROSSOVER")))
+            .child(
+                div()
+                    .display(Scale::X1, window)
+                    .text_color(hsla(p.accent_text))
+                    .child(if g.jackpot_ready {
+                        "JACKPOT LIT / REACTOR".into()
+                    } else if g.ramp_open {
+                        format!(
+                            "RAMP OPEN / {} SHOT",
+                            if g.board.ramp.points[0].x < 122. {
+                                "LEFT"
+                            } else {
+                                "RIGHT"
+                            }
+                        )
+                    } else {
+                        format!(
+                            "DROP {} > {} > {}",
+                            g.board.order[0] + 1,
+                            g.board.order[1] + 1,
+                            g.board.order[2] + 1
+                        )
+                    }),
+            )
+            .child(lights(g.drops))
+            .child(
+                div()
+                    .body(text::SM)
+                    .text_color(hsla(p.fg_dim))
+                    .child(if g.jackpot_ready {
+                        "Collect at the reactor. Ramp again to grow the jackpot."
+                    } else if g.ramp_open {
+                        "Build speed, clear the crest, and light the jackpot."
+                    } else {
+                        "Hit the numbered bank in order. A wrong shot resets it."
+                    }),
+            )
             .child(ascii_rule(Some("CIRCUIT BREAKER")))
             .child(lights(g.lamps))
             .child(
@@ -345,29 +432,7 @@ impl Render for Ricochet {
             )
             .child(ascii_rule(Some("MACHINE")))
             .child(ascii_gauge(g.charge).label("PULL").cells(10))
-            .child(ascii_gauge(g.tilt.clamp(0., 1.)).label("TILT").cells(10))
-            .child(
-                div()
-                    .display(Scale::X1, window)
-                    .text_color(hsla(if g.tilt >= 1. {
-                        p.danger
-                    } else if g.save_left > 0. {
-                        p.accent_text
-                    } else {
-                        p.fg_dim
-                    }))
-                    .child(if g.tilt >= 1. {
-                        "TILT / FLIPPERS LOCKED".into()
-                    } else if g.save_left > 0. {
-                        format!("BALL SAVE  {:02}", g.save_left.ceil() as u32)
-                    } else if self.demo {
-                        "ATTRACT MODE".into()
-                    } else if g.paused {
-                        "PAUSED / P TO RESUME".into()
-                    } else {
-                        "Q + E / KEEP IT ALIVE".into()
-                    }),
-            );
+            .child(ascii_gauge(g.tilt.clamp(0., 1.)).label("TILT").cells(10));
         let side = div()
             .id("machine-hud")
             .w(px(280.))
@@ -382,13 +447,77 @@ impl Render for Ricochet {
                 div()
                     .body(text::SM)
                     .text_color(hsla(p.fg_dim))
-                    .child(format!("{} / SERIES 02", g.board.title)),
+                    .child(format!("{} / SERIES 03", g.board.title)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Button::new("previous-table")
+                            .icon(Icon::ChevronLeft)
+                            .small()
+                            .secondary()
+                            .tooltip("Previous map / new round")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.cycle_table(-1, window, cx)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .display(Scale::X1, window)
+                            .text_color(hsla(p.fg_dim))
+                            .child(format!("{:02} / 10", g.board.design + 1)),
+                    )
+                    .child(
+                        Button::new("next-table")
+                            .icon(Icon::ChevronRight)
+                            .small()
+                            .secondary()
+                            .tooltip("Next map / new round")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.cycle_table(1, window, cx)),
+                            ),
+                    ),
             )
             .child(instrument)
+            .child(
+                div()
+                    .id("live-machine-state")
+                    .display(Scale::X1, window)
+                    .text_color(hsla(if g.tilt >= 1. {
+                        p.danger
+                    } else if g.tilt > 0.6 {
+                        p.warning
+                    } else {
+                        p.accent_text
+                    }))
+                    .child(if g.paused {
+                        "PAUSED / P TO RESUME".into()
+                    } else if g.tilt >= 1. {
+                        "TILT / Q + E DISABLED".into()
+                    } else if g.tilt > 0.6 {
+                        "TILT WARNING / EASE OFF".into()
+                    } else if g.rail_active {
+                        match g.rail_kind {
+                            physics::RailKind::Orbit => "ORBIT / CARRY MOMENTUM".into(),
+                            physics::RailKind::Ramp => "RAMP / CLIMB THE CREST".into(),
+                        }
+                    } else if g.save_left > 0. {
+                        format!("BALL SAVE {:02}", g.save_left.ceil() as u32)
+                    } else if self.demo {
+                        "ATTRACT MODE".into()
+                    } else {
+                        "Q + E / KEEP IT ALIVE".into()
+                    }),
+            )
             .child(div().body(text::SM).text_color(hsla(p.fg_dim)).children([
                 "Q / E FLIPPERS   SPACE PLUNGER",
                 "N NUDGE  P PAUSE  R NEW  F FX",
-                "CTRL SHIFT P / ROUNDS & THEMES",
+                "[ / ] MAP   CTRL SHIFT P MENU",
             ]))
             .child(
                 div()
@@ -461,6 +590,14 @@ impl Render for Ricochet {
                     if !this.focus.is_focused(window) {
                         return;
                     }
+                    if !ev.is_held && ev.keystroke.key == "[" {
+                        this.cycle_table(-1, window, cx);
+                        return;
+                    }
+                    if !ev.is_held && ev.keystroke.key == "]" {
+                        this.cycle_table(1, window, cx);
+                        return;
+                    }
                     this.key(&ev.keystroke.key, true, ev.is_held);
                     cx.notify();
                 }))
@@ -484,7 +621,13 @@ impl Render for Ricochet {
                 )
                 .child(
                     status_bar()
-                        .left_live(if g.paused { "PAUSED" } else { g.message })
+                        .left_live(if g.paused {
+                            "PAUSED"
+                        } else if g.tilt >= 1. {
+                            "TILT / FLIPPERS DISABLED"
+                        } else {
+                            g.message
+                        })
                         .right_live(format!(
                             "{} HITS / {} / Q + E",
                             g.hits,
@@ -496,6 +639,14 @@ impl Render for Ricochet {
     }
 }
 fn main() {
+    if std::env::args().any(|a| a == "--benchmark-all") {
+        benchmark::all();
+        return;
+    }
+    if std::env::args().any(|a| a == "--snapshot-all") {
+        benchmark::snapshot_all();
+        return;
+    }
     if std::env::args().any(|a| a == "--scene-snapshot") {
         benchmark::snapshot();
         return;
@@ -513,19 +664,7 @@ fn main() {
     }
 
     if std::env::args().any(|a| a == "--smoke") {
-        let mut g = physics::Game {
-            charge: 1.,
-            ..physics::Game::default()
-        };
-        g.launch();
-        for i in 0..2400 {
-            g.left = i % 60 < 30;
-            g.right = i % 73 < 35;
-            g.tick(1. / 120., false);
-            assert!(g.ball.x.is_finite() && g.ball.y.is_finite());
-        }
-        assert!(g.hits > 0);
-        println!("Physics smoke passed: {} hits, score {}", g.hits, g.score);
+        benchmark::smoke_all();
         return;
     }
     if std::env::args().any(|a| a == "--version") {
@@ -551,4 +690,16 @@ fn main() {
         .expect("open Ricochet");
         cx.activate(true);
     });
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    #[test]
+    fn every_ferrite_scheme_resolves_to_its_own_board() {
+        assert_eq!(SCHEMES.len(), board::ALL.len());
+        for scheme in SCHEMES {
+            assert_eq!(board::for_scheme(scheme.key).key, scheme.key);
+        }
+    }
 }

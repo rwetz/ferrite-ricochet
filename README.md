@@ -6,7 +6,7 @@ Hold **Q** and **E** for the left and right flippers. Hold **Space** to charge, 
 
 Choose a three- or five-ball round in the command menu, with a six-second ball save after each plunge. Bumpers award 100 points, slings 25, return lanes 50. Chain bumper hits within 2.5 seconds for combos up to 5x. Complete the bumper bank for 500 and a higher bank multiplier, or the three lanes for 250. High water is saved locally between sessions.
 
-Ferrite’s sequence: light the bumper bank to open the orbit gate, carry enough momentum through the elevated curved rail, then feed the central reactor scoop. Completing the sequence pays 750 for the orbit and 1,000 for the scoop, then doubles all scoring for 20 seconds. Weak rail shots roll back instead of completing automatically.
+The main sequence on every table: light the bumper bank to open the orbit gate, carry enough momentum through the elevated curved rail, then feed the central reactor scoop. Completing the sequence pays 750 for the orbit and 1,000 for the scoop, then doubles all scoring for 20 seconds. Weak rail shots roll back instead of completing automatically.
 
 ## Install
 Download the Windows setup installer or portable ZIP from Releases. Lodestone discovers this repository through the `ferrite-app` topic and installs its platform archive after checking `SHA256SUMS.txt`.
@@ -27,4 +27,23 @@ Release automation publishes a new patch release on every main push. Releases in
 
 See [performance and design notes](docs/PERFORMANCE.md) for measurements and their limits.
 
-Board identity, collision geometry, rail sampling and mission rules live in `src/board.rs`. The theme selector resolves a board through `for_scheme`; currently every scheme falls back to the authored Ferrite table. Adding a themed board there will switch geometry and reset the round when its board identity changes. Color-only fallback switches keep the current round.
+## Ten authored maps
+
+| Scheme | Map | Character |
+| --- | --- | --- |
+| Ferrite | Ferrous | Original factory circuit, left orbit and sweeping right crossover |
+| Mono | Monolith | Mirrored orbit, symmetric bumper bank and left crossover |
+| Graphite | Foundry | Staggered machinery and a diagonal center-spanning ramp |
+| Slate | Breakwater | Winding wave-like orbit and a wide, rising crossover |
+| Concrete | Switchyard | Split guides and a ramp threading between offset bumper cores |
+| Harbor | Drydock | Sweeping hull routes and an asymmetric dockside bank |
+| Cyanotype | Blueprint | Right orbit, left crossover and an etched engineering grid |
+| Phosphor | Critical | Tight core arrangement and a reactor-style sweeping ramp |
+| Verdigris | Oxide | Braided routes, offset cores and a descending target order |
+| Bruise | Blackout | Tight bends, offset targets and an angular crossover |
+
+Use the header arrows, **[ / ]**, or **Ctrl+Shift+P** to select a map. Scheme selection now selects its matching layout and starts a new round. Each map has its own record; your original high score is retained for Ferrite. Light/dark changes keep the current round.
+
+Each table also has a numbered drop-target bank. Hit the displayed order to open the crossover gate. A wrong target raises the bank again. A sufficiently strong ramp shot climbs the crest and lights a reactor jackpot; a weak shot rolls back. Completing another bank/ramp cycle increases the jackpot. This side sequence is independent of the bumper/orbit/overdrive sequence.
+
+`cargo run --release -- --benchmark-all` records static geometry build and dynamic preparation across every layout. `--smoke` runs a deterministic launch replay on all ten maps without a window. See [the catalog preview](docs/map-catalog.png) and [measurements](docs/PERFORMANCE.md).

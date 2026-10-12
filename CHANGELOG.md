@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+- Ten distinct maps, one for every Ferrite scheme, with authored bumper layouts, orbit and ramp curves, guides, target orders, reactor positions and etched graphics.
+- Added a second raised crossover ramp, ordered physical drop targets, reset-on-wrong-shot progression and reactor jackpots.
+- Rail inertia now includes the gravitational cost of gaining height. Fast shots crest; weak shots stall and roll back.
+- Added header map controls, bracket-key cycling, per-map records and safe separation of attract/profile scores from player records.
+- Added all-map simulation, geometry validation, benchmarks and profile context (board, viewport and scale factor).
+
 ## 0.2.0
 - Added progressive bumper-bank/orbit/reactor sequence, inertia-driven elevated rail, weak-shot rollback, overdrive and three/five-ball round selection.
 - Separated board identity from scheme selection for future themed tables.

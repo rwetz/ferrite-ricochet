@@ -167,6 +167,9 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
                 if profile::record(
                     begin,
                     cached.floor.len() + floor.len() + cached.solid.len() + solid.len(),
+                    g.board.key,
+                    [key[2], key[3]],
+                    window.scale_factor(),
                 ) {
                     cx.defer(|cx| cx.quit());
                 }

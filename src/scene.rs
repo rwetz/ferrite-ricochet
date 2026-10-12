@@ -1,5 +1,5 @@
 //! Perspective geometry shared by the live GPU canvas and the CPU benchmark.
-use crate::board::Board;
+use crate::board::{Board, Rail};
 use crate::physics::{Game, V};
 use std::f32::consts::{PI, TAU};
 #[derive(Clone, Copy, Debug, Default)]
@@ -185,7 +185,20 @@ fn prism(out: &mut Vec<Face>, outline: &[V], z: f32, height: f32, top: usize) {
 fn strip(out: &mut Vec<Face>, a: V, b: V, r: f32, z: f32, height: f32, ink: usize) {
     let d = b - a;
     let n = V::new(-d.y, d.x) * (r / d.len());
-    prism(out, &[a + n, b + n, b - n, a - n], z, height, ink);
+    if height <= 0.0001 {
+        let outline = [a + n, b + n, b - n, a - n];
+        face(
+            out,
+            outline
+                .iter()
+                .map(|v| P3::new(v.x, v.y, z))
+                .collect::<Vec<_>>(),
+            ink,
+            z <= 0.5,
+        );
+    } else {
+        prism(out, &[a + n, b + n, b - n, a - n], z, height, ink);
+    }
 }
 fn ring(out: &mut Vec<Face>, center: V, r: f32, width: f32, z: f32, ink: usize) {
     for i in 0..24 {
@@ -217,6 +230,17 @@ fn cylinder(out: &mut Vec<Face>, center: V, r: f32, z: f32, h: f32, top: usize) 
 }
 fn glyph(out: &mut Vec<Face>, x: f32, y: f32, s: f32, ch: char, ink: usize) {
     let rows = match ch {
+        'G' => [7, 4, 5, 5, 7],
+        'J' => [1, 1, 1, 5, 7],
+        'K' => [5, 5, 6, 5, 5],
+        'W' => [5, 5, 7, 7, 5],
+        'Y' => [5, 5, 2, 2, 2],
+        'Z' => [7, 1, 2, 4, 7],
+        '6' => [7, 4, 7, 5, 7],
+        '7' => [7, 1, 2, 2, 2],
+        '8' => [7, 5, 7, 5, 7],
+        '9' => [7, 5, 7, 1, 7],
+        '/' => [1, 1, 2, 4, 4],
         'Q' => [7, 5, 5, 7, 1],
         '+' => [0, 2, 7, 2, 0],
         'R' => [6, 5, 6, 5, 5],
@@ -267,6 +291,167 @@ fn lettering(out: &mut Vec<Face>, x: f32, y: f32, s: f32, text: &str, ink: usize
         glyph(out, x + i as f32 * s * 4., y, s, ch, ink);
     }
 }
+fn rail_mesh(out: &mut Vec<Face>, rail: &Rail, deck: bool) {
+    for i in 0..rail.points.len() - 1 {
+        let a = rail.points[i];
+        let b = rail.points[i + 1];
+        let d = b - a;
+        let n = V::new(-d.y, d.x) * (1. / d.len());
+        let z = rail.height(rail.distances[i]);
+        if deck {
+            strip(out, a, b, 4., z, 0.7, 3);
+        }
+        for side in [-5., 5.] {
+            strip(
+                out,
+                a + n * side,
+                b + n * side,
+                0.9,
+                z + if deck { 0.7 } else { 0. },
+                3.,
+                7,
+            );
+        }
+    }
+    if deck {
+        for i in (8..rail.points.len() - 8).step_by(12) {
+            let h = rail.height(rail.distances[i]);
+            if h > 6. {
+                cylinder(out, rail.points[i], 2.2, 0., h, 5);
+            }
+        }
+    }
+}
+fn etching(out: &mut Vec<Face>, board: &Board) {
+    match board.design {
+        0 => {
+            for r in [29., 39.] {
+                ring(out, board.scoop, r, 0.7, 0.3, 4);
+            }
+            for i in 0..16 {
+                let a = i as f32 * TAU / 16.;
+                let c = board.scoop + V::new(a.cos(), a.sin()) * 35.;
+                rect(out, c.x - 1., c.y - 1., 2., 2., 0.4, 5);
+            }
+        }
+        1 => {
+            for i in 0..7 {
+                let y = 80. + i as f32 * 24.;
+                rect(out, 48., y, 132., 0.7, 0.3, 4);
+            }
+            for x in [66., 90., 114., 138., 162.] {
+                rect(out, x, 68., 0.7, 151., 0.3, 4);
+            }
+        }
+        2 => {
+            for i in 0..4 {
+                let y = 72. + i as f32 * 42.;
+                let poly = (0..6)
+                    .map(|j| {
+                        let a = j as f32 * TAU / 6.;
+                        V::new(112. + 44. * a.cos(), y + 23. * a.sin())
+                    })
+                    .collect::<Vec<_>>();
+                for j in 0..6 {
+                    strip(out, poly[j], poly[(j + 1) % 6], 0.6, 0.3, 0., 4);
+                }
+            }
+        }
+        3 => {
+            for row in 0..5 {
+                for i in 0..24 {
+                    let x = 48. + i as f32 * 5.4;
+                    let next = x + 5.4;
+                    let y = 159. + row as f32 * 8.;
+                    strip(
+                        out,
+                        V::new(x, y + (x * 0.06).sin() * 10.),
+                        V::new(next, y + (next * 0.06).sin() * 10.),
+                        0.45,
+                        0.3,
+                        0.,
+                        4,
+                    );
+                }
+            }
+        }
+        4 => {
+            for i in 0..6 {
+                let x = 55. + i as f32 * 20.;
+                strip(out, V::new(x, 70.), V::new(112., 220.), 0.6, 0.3, 0., 4);
+                rect(out, x, 67., 5., 2., 0.3, 5);
+            }
+        }
+        5 => {
+            for r in [20., 32., 44.] {
+                ring(out, V::new(119., 173.), r, 0.7, 0.3, 4);
+            }
+            for i in 0..6 {
+                let y = 106. + i as f32 * 24.;
+                strip(out, V::new(58., y), V::new(164., y + 25.), 0.45, 0.3, 0., 4);
+            }
+        }
+        6 => {
+            for x in (45..190).step_by(18) {
+                rect(out, x as f32, 60., 0.4, 169., 0.3, 4);
+            }
+            for y in (66..224).step_by(18) {
+                rect(out, 40., y as f32, 152., 0.4, 0.3, 4);
+            }
+            ring(out, board.scoop, 24., 0.6, 0.3, 5);
+        }
+        7 => {
+            for r in [20., 31., 42., 53.] {
+                ring(out, V::new(116., 165.), r, 0.6, 0.3, 4);
+            }
+            for i in 0..12 {
+                let a = i as f32 * TAU / 12.;
+                strip(
+                    out,
+                    V::new(116., 165.) + V::new(a.cos(), a.sin()) * 45.,
+                    V::new(116., 165.) + V::new(a.cos(), a.sin()) * 56.,
+                    0.6,
+                    0.3,
+                    0.,
+                    5,
+                );
+            }
+        }
+        8 => {
+            for side in [-1., 1.] {
+                for i in 0..5 {
+                    let y = 92. + i as f32 * 24.;
+                    strip(
+                        out,
+                        V::new(112., y),
+                        V::new(112. + side * 48., y + 38.),
+                        0.5,
+                        0.3,
+                        0.,
+                        4,
+                    );
+                }
+            }
+        }
+        _ => {
+            for i in 0..10 {
+                let x = 52. + i as f32 * 11.;
+                strip(out, V::new(x, 177.), V::new(x + 22., 209.), 0.7, 0.3, 0., 4);
+            }
+            plate(
+                out,
+                &[
+                    V::new(62., 87.),
+                    V::new(143., 54.),
+                    V::new(132., 81.),
+                    V::new(177., 72.),
+                ],
+                0.3,
+                4,
+            );
+        }
+    }
+}
 pub fn static_table(board: &Board) -> Vec<Face> {
     let mut m = Vec::with_capacity(1400);
     // Cabinet: a solid body below the playfield, with a machined lip.
@@ -307,15 +492,16 @@ pub fn static_table(board: &Board) -> Vec<Face> {
             strip(&mut m, a, b, 0.35, 0.1, 0., 4);
         }
     }
-    ring(&mut m, V::new(112., 198.), 39., 0.7, 0.3, 4);
-    ring(&mut m, V::new(112., 198.), 29., 0.7, 0.3, 4);
-    for i in 0..16 {
-        let a = i as f32 * TAU / 16.;
-        let c = V::new(112. + 35. * a.cos(), 198. + 35. * a.sin());
-        rect(&mut m, c.x - 1., c.y - 1., 2., 2., 0.4, 5);
-    }
+    etching(&mut m, board);
     lettering(&mut m, 65., 207., 3., "RICOCHET", 6);
-    lettering(&mut m, 77., 227., 1.5, "FERROUS", 4);
+    lettering(
+        &mut m,
+        112. - board.title.len() as f32 * 3.,
+        227.,
+        1.5,
+        board.title,
+        4,
+    );
     lettering(&mut m, 47., 338., 1.4, "Q", 7);
     lettering(&mut m, 164., 338., 1.4, "E", 7);
     lettering(&mut m, 91., 285., 1.1, "BALL SAVE", 5);
@@ -343,19 +529,20 @@ pub fn static_table(board: &Board) -> Vec<Face> {
     }
     // Rollover lanes, miniature posts, fasteners and return-lane markings.
     for i in 0..3 {
-        let x = 65. + i as f32 * 42.;
+        let x = board.lanes[i].x;
+        let y = board.lanes[i].y;
         for dx in [-12., 12.] {
             strip(
                 &mut m,
-                V::new(x + dx, 38.),
-                V::new(x + dx, 60.),
+                V::new(x + dx, y - 16.),
+                V::new(x + dx, y + 6.),
                 1.,
                 0.,
                 5.,
                 6,
             );
         }
-        lettering(&mut m, x - 2., 43., 1.6, &(i + 1).to_string(), 7);
+        lettering(&mut m, x - 2., y - 11., 1.6, &(i + 1).to_string(), 7);
     }
     for (x, y) in [
         (30., 75.),
@@ -388,23 +575,34 @@ pub fn static_table(board: &Board) -> Vec<Face> {
             rect(&mut m, x, y as f32, 4., 1., 10., 4);
         }
     }
-    // Elevated, paired orbit rails. Their sampled curve is shared with the inertia simulation.
-    let rail = board.orbit;
-    for i in 0..rail.points.len() - 1 {
-        let a = rail.points[i];
-        let b = rail.points[i + 1];
-        let d = b - a;
-        let n = V::new(-d.y, d.x) * (1. / d.len());
-        let height = rail.height(rail.distances[i]);
-        for side in [-5., 5.] {
-            strip(&mut m, a + n * side, b + n * side, 0.9, height, 3., 7);
-        }
+    rail_mesh(&mut m, board.orbit, false);
+    rail_mesh(&mut m, board.ramp, true);
+    for t in board.targets {
+        prism(
+            &mut m,
+            &[
+                t.center + V::new(-6., -3.),
+                t.center + V::new(6., -3.),
+                t.center + V::new(6., 3.),
+                t.center + V::new(-6., 3.),
+            ],
+            0.,
+            1.,
+            5,
+        );
     }
     cylinder(&mut m, board.scoop, 12., 0., 1.5, 5);
     cylinder(&mut m, board.scoop, 8.5, 1.6, 0.5, 3);
     // Front apron plate and plunger assembly.
     rect(&mut m, 44., 350., 151., 16., 0.3, 3);
-    lettering(&mut m, 71., 354., 1.3, "MODEL 02", 7);
+    lettering(
+        &mut m,
+        65.,
+        354.,
+        1.3,
+        &format!("TABLE {:02}", board.design + 1),
+        7,
+    );
     strip(
         &mut m,
         V::new(212., 348.),
@@ -419,6 +617,68 @@ pub fn static_table(board: &Board) -> Vec<Face> {
 }
 pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
     let mut m = Vec::with_capacity(400);
+    let (a, b) = g.board.ramp_gate;
+    let end = if g.ramp_open {
+        V::new(a.x, a.y - 17.)
+    } else {
+        b
+    };
+    strip(
+        &mut m,
+        a,
+        end,
+        1.5,
+        0.,
+        8.,
+        if g.ramp_open { 10 } else { 8 },
+    );
+    for i in 0..3 {
+        let t = g.board.targets[i];
+        let height = if g.drops[i] {
+            0.8 + if effects {
+                g.target_flash[i].max(0.) * 7.2
+            } else {
+                0.
+            }
+        } else {
+            8.
+        };
+        let next =
+            !g.ramp_open && g.target_progress < 3 && g.board.order[g.target_progress as usize] == i;
+        let ink = if effects && g.target_flash[i] < 0. {
+            12
+        } else if next || g.target_flash[i] > 0. {
+            10
+        } else {
+            7
+        };
+        prism(
+            &mut m,
+            &[
+                t.center + V::new(-5., -2.),
+                t.center + V::new(5., -2.),
+                t.center + V::new(5., 2.),
+                t.center + V::new(-5., 2.),
+            ],
+            1.,
+            height,
+            if g.drops[i] { 5 } else { ink },
+        );
+        if height > 5. {
+            let mut numeral = Vec::new();
+            glyph(&mut numeral, -1.4, 0., 0.95, char::from(b'1' + i as u8), 8);
+            for mut f in numeral {
+                for p in &mut f.points {
+                    let py = p.y;
+                    p.x += t.center.x;
+                    p.y = t.center.y + 2.1;
+                    p.z = height - py;
+                }
+                f.floor = false;
+                m.push(f);
+            }
+        }
+    }
     let (a, b) = g.board.gate;
     let end = if g.mission >= 1 {
         V::new(a.x, a.y - 17.)
@@ -440,10 +700,24 @@ pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
         7.,
         2.2,
         0.2,
-        if g.mission >= 2 { 0 } else { 5 },
+        if g.mission >= 2 || g.jackpot_ready {
+            0
+        } else {
+            5
+        },
     );
-    if g.mission >= 2 {
+    if g.mission >= 2 || g.jackpot_ready {
         ring(&mut m, g.board.scoop, 13., 1.5, 0.5, 10);
+    }
+    if g.jackpot_ready {
+        lettering(
+            &mut m,
+            g.board.scoop.x - 14.,
+            g.board.scoop.y + 15.,
+            1.,
+            "JACKPOT",
+            10,
+        );
     }
     if g.overdrive > 0. {
         ring(&mut m, g.board.scoop, 27., 1., 0.5, 10);
@@ -452,7 +726,7 @@ pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
     for i in 0..3 {
         cylinder(
             &mut m,
-            V::new(65. + i as f32 * 42., 64.),
+            g.board.lanes[i] + V::new(0., 10.),
             2.5,
             0.,
             1.,
@@ -522,7 +796,7 @@ pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
     }
     // A faceted sphere with quantised highlights. Height and perspective are real.
     let lift = if g.rail_active {
-        g.board.orbit.height(g.rail_distance)
+        g.active_rail().height(g.rail_distance)
     } else {
         0.
     };
@@ -608,11 +882,18 @@ mod tests {
     #[test]
     fn projection_stays_finite_and_in_view() {
         let c = Camera::new(600., 720.);
-        for face in static_table(&crate::board::FERRITE) {
-            for p in face.points {
-                let (q, _) = c.project(p);
-                assert!(q[0].is_finite() && q[1].is_finite());
-                assert!(q[0] > -10. && q[0] < 610. && q[1] > -10. && q[1] < 730.);
+        for board in crate::board::ALL {
+            for face in static_table(board) {
+                for p in face.points {
+                    let (q, _) = c.project(p);
+                    assert!(q[0].is_finite() && q[1].is_finite());
+                    assert!(
+                        q[0] > -10. && q[0] < 610. && q[1] > -10. && q[1] < 730.,
+                        "{}: {:?}",
+                        board.key,
+                        q
+                    );
+                }
             }
         }
     }
