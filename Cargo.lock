@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-ricochet"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ferrite-design",
  "gpui-pre",

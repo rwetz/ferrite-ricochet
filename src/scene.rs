@@ -2,6 +2,8 @@
 use crate::board::{Board, Rail};
 use crate::physics::{Game, V};
 use std::f32::consts::{PI, TAU};
+#[path = "scenery.rs"]
+mod scenery;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct P3 {
     pub x: f32,
@@ -69,8 +71,8 @@ impl Camera {
             oy: 0.,
         };
         let corners = [
-            P3::new(-8., -13., 30.),
-            P3::new(252., -13., 30.),
+            P3::new(-8., -13., 64.),
+            P3::new(252., -13., 64.),
             P3::new(-8., 393., -24.),
             P3::new(252., 393., -24.),
         ];
@@ -613,10 +615,12 @@ pub fn static_table(board: &Board) -> Vec<Face> {
         6,
     );
     cylinder(&mut m, V::new(212., 373.), 5., 0., 4., 7);
+    scenery::decorate(&mut m, board);
     m
 }
 pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
     let mut m = Vec::with_capacity(400);
+    scenery::progress_lights(&mut m, g);
     let (a, b) = g.board.ramp_gate;
     let end = if g.ramp_open {
         V::new(a.x, a.y - 17.)

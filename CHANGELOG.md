@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+- Added ten bespoke 3D cabinet centerpieces: a flywheel gantry, monoliths, hydraulic press, lighthouse, locomotive, dock crane and cargo ship, wireframe drafting rig, reactor coils, oxidized pump and lightning sculpture with speaker stacks.
+- Added theme-specific bumper rim hardware, playfield emblems, stenciled aprons, service hatches, vents, rivets and shot inlays.
+- Added cabinet progression lamps tied to the bumper bank, target bank, crossover gate and jackpot.
+- Kept raised decorations outside the playable field and cached their meshes; widened camera framing to contain the new silhouettes.
+
 ## 0.3.1
 - Bundled the map catalog, performance report and raw measurements with every platform package and Windows installer.
 - Documented native v0.3.0 measurements for all ten maps: approximately 60 observed FPS, with no paint intervals above 20 ms during the measured sessions.

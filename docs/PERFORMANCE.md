@@ -64,3 +64,9 @@ Each map ran in the checksum-verified Windows release binary for 20 seconds, wit
 The busiest layout's p95 table CPU paint time was 2.503 ms. These measurements include the table paint callback and path submission, but exclude asynchronous GPU completion and GPU presentation timestamps. They demonstrate consistent app paint cadence on this machine and viewport, not a universal hardware frame-rate guarantee. Raw per-map JSON is bundled in [profiles-v0.3.0](profiles-v0.3.0/).
 
 All ten shipped maps also passed deterministic launch replays. Automated checks cover rail continuity, fast-shot completion versus weak-shot rollback on every ramp and orbit, ordered contacts, jackpot progression, round limits, and scheme-to-map resolution. Native UI inspection verified the header map control, matching palette/layout changes and the five-ball round command.
+
+## v0.4 decorative asset pass
+
+Ten authored centerpieces, bumper hardware, cabinet service plates, vents, rivets, playfield emblems and stencils are built into the existing mesh renderer. There are no new image uploads, asset downloads or continuously animated decorative simulations. Raised toys sit outside the playable field; the new playfield artwork is flush. The camera reserves space for the taller silhouettes, and the same projection/bounds checks cover every new face.
+
+The standalone all-map render fixture measured fewer than 4,400 static faces per layout, below 0.7 ms for one-time geometry construction/projection and below 0.07 ms p95 for dynamic preparation on this machine. Static geometry is cached at the native window's size. The only new per-frame geometry is six small progression lamps. Raw CPU fixture measurements are in `benchmark-decorations.json`; these preparation timings exclude native tessellation, submission and GPU presentation.
