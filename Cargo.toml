@@ -1,0 +1,18 @@
+[package]
+name = "ferrite-ricochet"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "A gritty native pinball machine. ASCII instruments, dithered steel, and kinetic Ferrite physics."
+repository = "https://github.com/rwetz/ferrite-ricochet"
+
+[dependencies]
+ferrite-design = { git = "https://github.com/rwetz/ferrite-design", rev = "b37c50104b6e8fcb88e5fdd787a5b7112f17466d" }
+gpui = { package = "gpui-pre", version = "=0.3.8" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8" }
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.31"

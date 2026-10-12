@@ -1,0 +1,101 @@
+name: Release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+permissions:
+  contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      ref: ${{ steps.release.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+      - id: release
+        run: python3 .github/scripts/prepare_release.py
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      CARGO_BUILD_JOBS: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libxcb1-dev libfontconfig-dev libssl-dev
+      - run: cargo test --release --locked --target ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "ferrite-ricochet-$env:RELEASE_TAG-x86_64-pc-windows-msvc"
+          $folder = Join-Path $env:RUNNER_TEMP $name
+          New-Item -ItemType Directory -Path $folder | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/ferrite-ricochet.exe $folder
+          foreach ($file in @('README.md', 'LICENSE', 'NOTICE', 'CHANGELOG.md')) { Copy-Item $file $folder }
+          Copy-Item assets/licenses $folder -Recurse
+          $process = Start-Process -FilePath (Join-Path $folder 'ferrite-ricochet.exe') -ArgumentList '--version' -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Executable verification failed' }
+          New-Item -ItemType Directory dist | Out-Null
+          Compress-Archive -LiteralPath $folder -DestinationPath "dist/$name.zip"
+      - if: runner.os == 'Windows'
+        run: choco install nsis --version=3.13.0 -y --no-progress
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python .github/scripts/package_windows.py --source "$env:RUNNER_TEMP/ferrite-ricochet-$env:RELEASE_TAG-x86_64-pc-windows-msvc" --tag $env:RELEASE_TAG --output-dir dist
+          if ($LASTEXITCODE -ne 0) { throw 'Setup packaging failed' }
+      - if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          name="ferrite-ricochet-$RELEASE_TAG-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/ferrite-ricochet" "dist/$name/"
+          "dist/$name/ferrite-ricochet" --version
+          cp README.md LICENSE NOTICE CHANGELOG.md "dist/$name/"
+          cp -r assets/licenses "dist/$name/"
+          tar -czf "dist/$name.tar.gz" -C dist "$name"
+          rm -r "dist/$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          gh release create "$RELEASE_TAG" * --repo "$GITHUB_REPOSITORY" --verify-tag --title "Ricochet $RELEASE_TAG" --generate-notes
