@@ -63,6 +63,7 @@ pub struct Game {
     pub charge: f32,
     pub shaking: f32,
     pub flash: [f32; 3],
+    pub slings: [f32; 2],
     pub trail: Vec<V>,
     pub time: f32,
     pub tilt: f32,
@@ -87,6 +88,7 @@ impl Default for Game {
             charge: 0.,
             shaking: 0.,
             flash: [0.; 3],
+            slings: [0.; 2],
             trail: Vec::new(),
             time: 0.,
             tilt: 0.,
@@ -105,7 +107,7 @@ impl Game {
     }
     pub fn launch(&mut self) {
         if !self.live && self.balls > 0 && !self.paused {
-            self.vel = V::new(-12., -370. - self.charge * 170.);
+            self.vel = V::new(-12., -400. - self.charge * 140.);
             self.live = true;
             self.charge = 0.;
             self.message = "SHOOT THE BUMPER BANK";
@@ -139,6 +141,9 @@ impl Game {
         for f in &mut self.flash {
             *f = (*f - dt * 3.).max(0.);
         }
+        for cooldown in &mut self.slings {
+            *cooldown = (*cooldown - dt).max(0.);
+        }
         self.tilt = (self.tilt - dt * 0.05).max(0.);
         let old = self.angles;
         let enabled = self.tilt < 1.;
@@ -159,8 +164,25 @@ impl Game {
             self.ball = V::new(190., 58.);
             self.vel = V::new(-180., -75.);
         }
-        for (a, b) in WALLS {
-            self.collide(a, b, 2., 0.82, V::default());
+        for (index, (a, b)) in WALLS.into_iter().enumerate() {
+            if index == 9 || index == 10 {
+                let ab = b - a;
+                let t = ((self.ball - a).dot(ab) / ab.dot(ab)).clamp(0., 1.);
+                let d = self.ball - (a + ab * t);
+                let l = d.len();
+                let incoming = l > 0.001 && self.vel.dot(d * (1. / l)) < 0.;
+                self.collide(a, b, 2., 0.95, V::default());
+                let sling = index - 9;
+                if l < 6. && incoming && self.slings[sling] <= 0. {
+                    self.vel = self.vel + V::new(if sling == 0 { 95. } else { -95. }, -120.);
+                    self.score += 25 * self.multiplier;
+                    self.slings[sling] = 0.15;
+                    self.shaking = 0.35;
+                    self.message = "SLING / +25";
+                }
+            } else {
+                self.collide(a, b, 2., 0.82, V::default());
+            }
         }
         for (i, previous) in old.iter().enumerate() {
             let (a, b) = self.flipper(i);
@@ -190,19 +212,6 @@ impl Game {
                     }
                 }
             }
-        }
-        // Kickback slings have a cooldown through the shared impact envelope.
-        if self.shaking < 0.05
-            && self.ball.y > 225.
-            && self.ball.y < 266.
-            && self.ball.x < 190.
-            && (self.ball.x < 72. || self.ball.x > 154.)
-        {
-            self.vel.x = if self.ball.x < 112. { 140. } else { -140. };
-            self.vel.y = -190.;
-            self.score += 25 * self.multiplier;
-            self.shaking = 0.35;
-            self.message = "SLING / +25";
         }
         let speed = self.vel.len();
         if speed > 620. {
@@ -312,5 +321,27 @@ mod tests {
             g.step(1. / 240.);
         }
         assert!(g.vel.y < 0., "rising flipper must transfer velocity");
+    }
+    #[test]
+    fn launch_lane_cannot_award_sling_points() {
+        let mut g = Game {
+            live: true,
+            ball: V::new(212., 245.),
+            vel: V::new(0., -80.),
+            ..Game::default()
+        };
+        g.step(1. / 240.);
+        assert_eq!(g.score, 0);
+    }
+    #[test]
+    fn quick_plunge_reaches_playfield() {
+        let mut g = Game::default();
+        g.launch();
+        let mut entered = false;
+        for _ in 0..400 {
+            g.tick(1. / 120., false);
+            entered |= g.live && g.ball.x < 195.;
+        }
+        assert!(entered, "even a quick press must feed the table");
     }
 }
