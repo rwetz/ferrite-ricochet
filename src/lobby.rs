@@ -64,11 +64,20 @@ pub(super) fn screen(
                 .flex_1()
                 .min_h_0()
                 .bg(hsla(p.sunken))
-                .child(div().absolute().inset_0().child(develop(
-                    "machine-preview",
-                    (g.board.key, this.result_id, results),
-                    table::table(preview, false, cx),
-                ))),
+                .child(
+                    div().absolute().inset_0().child(develop(
+                        "machine-preview",
+                        (g.board.key, this.result_id, results),
+                        div()
+                            .w(px(
+                                (f32::from(window.viewport_size().width) - 388.).max(120.)
+                            ))
+                            .h(px(
+                                (f32::from(window.viewport_size().height) - 210.).max(140.)
+                            ))
+                            .child(table::table(preview, false, cx)),
+                    )),
+                ),
         )
         .child(
             div()

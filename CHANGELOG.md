@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.1
+- Gave animated machine previews explicit viewport dimensions after native inspection exposed a collapsed animation wrapper.
+
 ## 0.5.0
 - Expanded every physical table by 35% in width and 18% in length while retaining ball, bumper and target sizes. Tuned flippers, launcher routing and camera framing for the larger field.
 - Added an animated welcome screen with board previews, machine selection, round modes, local rankings and scoring rules.
