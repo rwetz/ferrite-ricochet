@@ -1580,6 +1580,7 @@ dependencies = [
  "ferrite-design",
  "gpui-pre",
  "gpui-pre-platform",
+ "image",
  "winresource",
 ]
 

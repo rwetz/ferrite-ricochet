@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod physics;
+mod records;
 mod table;
 use ferrite_design::prelude::*;
 use gpui::{
@@ -15,6 +16,11 @@ struct Ricochet {
     effects: bool,
     _tick: Task<()>,
     _appearance: Subscription,
+}
+impl Drop for Ricochet {
+    fn drop(&mut self) {
+        records::save(self.game.best);
+    }
 }
 impl Focusable for Ricochet {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -36,7 +42,11 @@ impl Ricochet {
                 last = now;
                 if this
                     .update(cx, |this, cx| {
+                        let was_live = this.game.live;
                         this.game.tick(dt, this.charging);
+                        if was_live && !this.game.live {
+                            records::save(this.game.best);
+                        }
                         cx.notify();
                     })
                     .is_err()
@@ -90,7 +100,10 @@ impl Ricochet {
         palette.update(cx, |p, cx| p.set_commands(commands, cx));
         focus.focus(window, cx);
         Self {
-            game: physics::Game::default(),
+            game: physics::Game {
+                best: records::load(),
+                ..physics::Game::default()
+            },
             palette,
             focus,
             charging: false,
@@ -129,6 +142,14 @@ impl Ricochet {
 }
 impl Render for Ricochet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !window.is_window_active() {
+            self.game.left = false;
+            self.game.right = false;
+            self.charging = false;
+            if self.game.live {
+                self.game.paused = true;
+            }
+        }
         let p = palette(cx);
         let g = &self.game;
         let effects = self.effects && !motion::reduced(cx);
@@ -278,6 +299,22 @@ impl Render for Ricochet {
     }
 }
 fn main() {
+    if std::env::args().any(|a| a == "--smoke") {
+        let mut g = physics::Game {
+            charge: 1.,
+            ..physics::Game::default()
+        };
+        g.launch();
+        for i in 0..2400 {
+            g.left = i % 60 < 30;
+            g.right = i % 73 < 35;
+            g.tick(1. / 120., false);
+            assert!(g.ball.x.is_finite() && g.ball.y.is_finite());
+        }
+        assert!(g.hits > 0);
+        println!("Physics smoke passed: {} hits, score {}", g.hits, g.score);
+        return;
+    }
     if std::env::args().any(|a| a == "--version") {
         println!("Ricochet {}", env!("CARGO_PKG_VERSION"));
         return;

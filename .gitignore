@@ -2,3 +2,5 @@
 *.exe
 /trace.rs
 *.pdb
+/optimize.py
+/polish.py

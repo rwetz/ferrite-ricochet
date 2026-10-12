@@ -1,12 +1,34 @@
 use crate::physics::{BUMPERS, Game, V, WALLS};
 use ferrite_design::prelude::*;
-use gpui::{Bounds, IntoElement, Pixels, Window, canvas, point, px, size};
+use gpui::{Bounds, Corners, IntoElement, Pixels, RenderImage, Window, canvas, point, px, size};
+use std::{cell::RefCell, sync::Arc};
+thread_local! { static LAST_FRAME: RefCell<Option<Arc<RenderImage>>> = const { RefCell::new(None) }; }
 fn distance(p: V, a: V, b: V) -> f32 {
     let ab = b - a;
     let t = ((p - a).dot(ab) / ab.dot(ab)).clamp(0., 1.);
     (p - a - ab * t).len()
 }
 const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+// Three-by-five stamped cabinet type, rasterised on the same pixel grid.
+fn stamp(x: usize, y: usize) -> bool {
+    if !(72..136).contains(&x) || !(193..203).contains(&y) {
+        return false;
+    }
+    let col = (x - 72) / 2;
+    let row = (y - 193) / 2;
+    let glyphs: [[u8; 5]; 8] = [
+        [6, 5, 6, 5, 5],
+        [7, 2, 2, 2, 7],
+        [7, 4, 4, 4, 7],
+        [7, 5, 5, 5, 7],
+        [7, 4, 4, 4, 7],
+        [5, 5, 7, 5, 5],
+        [7, 4, 6, 4, 7],
+        [7, 2, 2, 2, 2],
+    ];
+    let local = col % 4;
+    local < 3 && (glyphs[col / 4][row] & (1 << (2 - local))) != 0
+}
 pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
     let p = palette(cx);
     let colors = [
@@ -18,7 +40,12 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
         hsla(p.fg),
         hsla(p.accent),
         hsla(p.accent_dim),
-    ];
+    ]
+    .map(|color| {
+        let c = color.to_rgb();
+        let b = |f: f32| (f.clamp(0., 1.) * 255.).round() as u8;
+        [b(c.b), b(c.g), b(c.r), b(c.a)]
+    });
     canvas(
         |_, _, _| {},
         move |bounds: Bounds<Pixels>, _, window: &mut Window, _| {
@@ -33,14 +60,11 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
             } else {
                 0.
             };
+            let mut pixels = Vec::with_capacity(244 * 380 * 4);
             for y in 0..380 {
-                let mut start = 0;
-                let mut last = 0;
-                for x in 0..=244 {
-                    let color = if x == 244 {
-                        255
-                    } else {
-                        let q = V::new(x as f32 - shake, y as f32);
+                for x in 0..244 {
+                    let color = {
+                        let q = V::new(x as f32 - shake, y as f32 - shake * 0.5);
                         let threshold = BAYER[y % 4][x % 4];
                         let mut c = if x % 24 == 0 && y % 24 == 0 { 2 } else { 0 };
                         // Dithered outer apron and stamped ribs, never a gradient.
@@ -119,6 +143,9 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
                                 }
                             }
                         }
+                        if stamp(x, y) {
+                            c = 4;
+                        }
                         let d = (q - g.ball).len();
                         if d < 4. {
                             c = if q.x < g.ball.x && q.y < g.ball.y {
@@ -136,21 +163,31 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
                         }
                         c
                     };
-                    if color != last {
-                        if last != 0 && x > start {
-                            window.paint_quad(gpui::fill(
-                                Bounds::new(
-                                    point(ox + px(start as f32 * scale), oy + px(y as f32 * scale)),
-                                    size(px((x - start) as f32 * scale), px(scale)),
-                                ),
-                                colors[last as usize],
-                            ));
-                        }
-                        start = x;
-                        last = color;
-                    }
+                    pixels.extend_from_slice(&colors[color]);
                 }
             }
+            let native = image::RgbaImage::from_raw(244, 380, pixels).expect("table raster");
+            let physical_scale = (scale * sf).round() as u32;
+            let raster = image::imageops::resize(
+                &native,
+                244 * physical_scale,
+                380 * physical_scale,
+                image::imageops::FilterType::Nearest,
+            );
+            let image = Arc::new(RenderImage::new([image::Frame::new(raster)]));
+            LAST_FRAME.with_borrow_mut(|last| {
+                if let Some(old) = last.replace(image.clone()) {
+                    let _ = window.drop_image(old);
+                }
+            });
+            let target = Bounds::new(
+                point(
+                    px((f32::from(ox) * sf).round() / sf),
+                    px((f32::from(oy) * sf).round() / sf),
+                ),
+                size(px(244. * scale), px(380. * scale)),
+            );
+            let _ = window.paint_image(target, target, Corners::default(), image, 0, false);
         },
     )
     .size_full()

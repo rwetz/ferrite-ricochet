@@ -58,7 +58,7 @@ jobs:
           Copy-Item target/x86_64-pc-windows-msvc/release/ferrite-ricochet.exe $folder
           foreach ($file in @('README.md', 'LICENSE', 'NOTICE', 'CHANGELOG.md')) { Copy-Item $file $folder }
           Copy-Item assets/licenses $folder -Recurse
-          $process = Start-Process -FilePath (Join-Path $folder 'ferrite-ricochet.exe') -ArgumentList '--version' -WindowStyle Hidden -Wait -PassThru
+          $process = Start-Process -FilePath (Join-Path $folder 'ferrite-ricochet.exe') -ArgumentList '--smoke' -WindowStyle Hidden -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw 'Executable verification failed' }
           New-Item -ItemType Directory dist | Out-Null
           Compress-Archive -LiteralPath $folder -DestinationPath "dist/$name.zip"
@@ -75,7 +75,7 @@ jobs:
           name="ferrite-ricochet-$RELEASE_TAG-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp "target/${{ matrix.target }}/release/ferrite-ricochet" "dist/$name/"
-          "dist/$name/ferrite-ricochet" --version
+          "dist/$name/ferrite-ricochet" --smoke
           cp README.md LICENSE NOTICE CHANGELOG.md "dist/$name/"
           cp -r assets/licenses "dist/$name/"
           tar -czf "dist/$name.tar.gz" -C dist "$name"
