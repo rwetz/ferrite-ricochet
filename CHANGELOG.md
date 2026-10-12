@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+- Bundled the map catalog, performance report and raw measurements with every platform package and Windows installer.
+- Documented native v0.3.0 measurements for all ten maps: approximately 60 observed FPS, with no paint intervals above 20 ms during the measured sessions.
+
 ## 0.3.0
 - Ten distinct maps, one for every Ferrite scheme, with authored bumper layouts, orbit and ramp curves, guides, target orders, reactor positions and etched graphics.
 - Added a second raised crossover ramp, ordered physical drop targets, reset-on-wrong-shot progression and reactor jackpots.

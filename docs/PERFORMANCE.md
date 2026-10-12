@@ -29,8 +29,8 @@ The `--profile` mode measures the entire table paint callback, including dynamic
 ## Boundaries
 This renderer is a fixed-camera 3D mesh renderer inside GPUI, with painter-order visibility rather than a general engine/depth buffer. It preserves the shared Ferrite shell, scheme tokens, pixel type and stepped hit effects. Physical metal highlights come from discrete material roles; there are no texture gradients or full-frame ASCII filters. Mechanical audio currently uses the Windows system mixer; other platform builds retain visual feedback.
 
-## Progressive table pass
-Ferrite now has an elevated sampled Bezier orbit, a physical gate, a staged reactor scoop and a 20-second overdrive. The rail simulation conserves forward/rollback momentum under table gravity and drag. A fast shot completes; a weak one stalls and rolls back. Three- and five-ball rounds are selectable. Other themes currently resolve to the authored Ferrite board, with a stable board-identity/cache seam ready for future layouts.
+## v0.2 progressive table pass
+Ferrite gained an elevated sampled Bezier orbit, a physical gate, a staged reactor scoop and a 20-second overdrive. Rail speed evolves under table gravity and drag. A fast shot completes; a weak one stalls and rolls back. Three- and five-ball rounds are selectable. This iteration established board identity and caching; v0.3 supplies a distinct layout for every scheme.
 
 ## Verified live result after frame-clock correction
 On Windows with a Ryzen 7 9800X3D, the 20-second native session (two-second warmup excluded) recorded 1,081 measured frames, 60.003 observed FPS, p95 paint interval 17.274 ms and no interval above 20 ms. Table CPU paint time was 1.578 ms at p95 and 2.004 ms maximum, with up to 1,800 submitted paths. The first live mesh candidate had measured 32.470 observed FPS and 33.756 ms p95 intervals. The frame-clock correction therefore addressed a separate scheduling ceiling as well as the raster bottleneck.
@@ -43,3 +43,24 @@ The native run used the remembered default window size, effects on, the Ferrite 
 All ten schemes now resolve to distinct authored board definitions, including different bumper layouts, guides, lane positions, ordered target banks, reactor positions, orbit curves and crossover curves. The second ramp has a solid elevated deck and supports. Wrong-order target contacts reset the bank; a completed sequence physically opens its ramp gate. Strong shots crest and light jackpots; weak shots roll back. Rail acceleration includes table gravity, height gradient and drag. Static geometry remains cached.
 
 The all-map CPU fixture builds each layout once, then measures 360 dynamic geometry/projection samples after 60 warmup samples, including alternating flippers, bumper flashes and ramp traversal. It is a synthetic render fixture rather than GPU presentation telemetry. Raw results are in `benchmark-all-maps.json`: static build costs were below 0.6 ms and p95 dynamic preparation below 0.07 ms in this run. Native cadence is validated separately on the shipped binary.
+
+## Shipped v0.3.0: native measurements across all maps
+
+Each map ran in the checksum-verified Windows release binary for 20 seconds, with two seconds of warmup excluded. The table viewport was 672 x 732 logical pixels at 150% display scale, with impact effects enabled and silent attract mode. This machine uses a Ryzen 7 9800X3D. Every run produced 1,081 measured frames and zero paint intervals above 20 ms.
+
+| Scheme | Observed FPS | CPU paint p95 (ms) | Paint interval p95 (ms) |
+| --- | ---: | ---: | ---: |
+| Ferrite | 60.001 | 2.207 | 17.210 |
+| Mono | 60.003 | 2.319 | 17.229 |
+| Graphite | 59.999 | 2.269 | 17.227 |
+| Slate | 60.001 | 2.411 | 17.251 |
+| Concrete | 60.000 | 2.309 | 17.228 |
+| Harbor | 59.999 | 2.306 | 17.244 |
+| Cyanotype | 60.002 | 2.367 | 17.209 |
+| Phosphor | 59.999 | 2.503 | 17.212 |
+| Verdigris | 59.999 | 2.377 | 17.205 |
+| Bruise | 59.999 | 2.259 | 17.134 |
+
+The busiest layout's p95 table CPU paint time was 2.503 ms. These measurements include the table paint callback and path submission, but exclude asynchronous GPU completion and GPU presentation timestamps. They demonstrate consistent app paint cadence on this machine and viewport, not a universal hardware frame-rate guarantee. Raw per-map JSON is bundled in [profiles-v0.3.0](profiles-v0.3.0/).
+
+All ten shipped maps also passed deterministic launch replays. Automated checks cover rail continuity, fast-shot completion versus weak-shot rollback on every ramp and orbit, ordered contacts, jackpot progression, round limits, and scheme-to-map resolution. Native UI inspection verified the header map control, matching palette/layout changes and the five-ball round command.

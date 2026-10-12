@@ -58,6 +58,7 @@ jobs:
           Copy-Item target/x86_64-pc-windows-msvc/release/ferrite-ricochet.exe $folder
           foreach ($file in @('README.md', 'LICENSE', 'NOTICE', 'CHANGELOG.md')) { Copy-Item $file $folder }
           Copy-Item assets/licenses $folder -Recurse
+          Copy-Item docs $folder -Recurse
           $process = Start-Process -FilePath (Join-Path $folder 'ferrite-ricochet.exe') -ArgumentList '--smoke' -WindowStyle Hidden -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw 'Executable verification failed' }
           New-Item -ItemType Directory dist | Out-Null
@@ -78,6 +79,7 @@ jobs:
           "dist/$name/ferrite-ricochet" --smoke
           cp README.md LICENSE NOTICE CHANGELOG.md "dist/$name/"
           cp -r assets/licenses "dist/$name/"
+          cp -r docs "dist/$name/"
           tar -czf "dist/$name.tar.gz" -C dist "$name"
           rm -r "dist/$name"
       - uses: actions/upload-artifact@v4
