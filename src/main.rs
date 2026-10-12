@@ -42,6 +42,19 @@ impl Ricochet {
                 last = now;
                 if this
                     .update(cx, |this, cx| {
+                        if this.game.paused {
+                            return;
+                        }
+                        let active = this.game.live
+                            || this.charging
+                            || this.game.left
+                            || this.game.right
+                            || this.game.shaking > 0.
+                            || (this.game.angles[0] - 0.42).abs() > 0.001
+                            || (this.game.angles[1] - (std::f32::consts::PI - 0.42)).abs() > 0.001;
+                        if !active {
+                            return;
+                        }
                         let was_live = this.game.live;
                         this.game.tick(dt, this.charging);
                         if was_live && !this.game.live {
@@ -70,7 +83,10 @@ impl Ricochet {
                     match action {
                         0 => this.game.reset(),
                         1 => this.game.paused = !this.game.paused,
-                        2 => this.game.launch(),
+                        2 => {
+                            this.game.paused = false;
+                            this.game.launch();
+                        }
                         _ => this.effects = !this.effects,
                     }
                     this.focus.focus(window, cx);
