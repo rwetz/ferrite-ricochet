@@ -1,6 +1,40 @@
 //! Every Ferrite scheme owns its collision layout, routes, target sequence and etched playfield.
 use crate::physics::V;
 use std::sync::LazyLock;
+// Authored layouts keep their design-space coordinates. Placement expands the
+// field without enlarging the ball, bumpers, target faces or rail widths.
+pub const SPACE_X: f32 = 1.35;
+pub const SPACE_Y: f32 = 1.18;
+pub const WIDTH: f32 = 244. * SPACE_X;
+pub const HEIGHT: f32 = 380. * SPACE_Y;
+pub const FLIPPER_LENGTH: f32 = 46.;
+pub const SHOOTER: V = place(V::new(212., 329.));
+pub const DRAIN_Y: f32 = 373. * SPACE_Y;
+pub const fn place(p: V) -> V {
+    V::new(p.x * SPACE_X, p.y * SPACE_Y)
+}
+pub fn unplace(p: V) -> V {
+    V::new(p.x / SPACE_X, p.y / SPACE_Y)
+}
+const fn placed<const N: usize>(p: [V; N]) -> [V; N] {
+    let mut result = p;
+    let mut i = 0;
+    while i < N {
+        result[i] = place(result[i]);
+        i += 1;
+    }
+    result
+}
+pub const fn flipper_pivot(i: usize) -> V {
+    V::new(
+        if i == 0 {
+            68. * SPACE_X + 6.
+        } else {
+            158. * SPACE_X - 6.
+        },
+        307. * SPACE_Y,
+    )
+}
 pub const BUMPERS: [V; 3] = [V::new(78., 112.), V::new(150., 96.), V::new(120., 161.)];
 pub const WALLS: [(V, V); 12] = [
     (V::new(22., 330.), V::new(22., 55.)),
@@ -38,20 +72,23 @@ pub struct Board {
     pub lanes: [V; 3],
 }
 const fn gate(entry: V) -> (V, V) {
-    (V::new(entry.x - 9., entry.y), V::new(entry.x + 9., entry.y))
+    (
+        V::new(entry.x - 6.5, entry.y),
+        V::new(entry.x + 6.5, entry.y),
+    )
 }
 const fn target_bank(points: [V; 3]) -> [DropTarget; 3] {
     [
         DropTarget {
-            center: points[0],
+            center: place(points[0]),
             normal: V::new(0., 1.),
         },
         DropTarget {
-            center: points[1],
+            center: place(points[1]),
             normal: V::new(0., 1.),
         },
         DropTarget {
-            center: points[2],
+            center: place(points[2]),
             normal: V::new(0., 1.),
         },
     ]
@@ -60,11 +97,13 @@ const fn guides(extra: [(V, V); 2]) -> [(V, V); 14] {
     let mut walls = [(V::new(0., 0.), V::new(0., 0.)); 14];
     let mut i = 0;
     while i < 12 {
-        walls[i] = WALLS[i];
+        walls[i] = (place(WALLS[i].0), place(WALLS[i].1));
         i += 1;
     }
-    walls[12] = extra[0];
-    walls[13] = extra[1];
+    walls[7].1 = flipper_pivot(0);
+    walls[8].1 = flipper_pivot(1);
+    walls[12] = (place(extra[0].0), place(extra[0].1));
+    walls[13] = (place(extra[1].0), place(extra[1].1));
     walls
 }
 macro_rules! v {
@@ -81,13 +120,13 @@ macro_rules! map {
             key: $key,
             title: $title,
             design: $design,
-            bumpers: &$bumpers,
-            scoop: $scoop,
+            bumpers: &placed($bumpers),
+            scoop: place($scoop),
             targets: target_bank($targets),
             order: $order,
-            lanes: $lanes,
-            gate: gate($orbit_curves[0][0]),
-            ramp_gate: gate($ramp_curves[0][0]),
+            lanes: placed($lanes),
+            gate: gate(place($orbit_curves[0][0])),
+            ramp_gate: gate(place($ramp_curves[0][0])),
             walls: &$walls,
             orbit: &$orbit,
             ramp: &$ramp,
@@ -476,12 +515,12 @@ impl Rail {
                 }
                 let t = step as f32 / steps as f32;
                 let u = 1. - t;
-                points.push(
+                points.push(place(
                     p[0] * (u * u * u)
                         + p[1] * (3. * u * u * t)
                         + p[2] * (3. * u * t * t)
                         + p[3] * (t * t * t),
-                );
+                ));
             }
         }
         let mut distances = vec![0.];
@@ -526,7 +565,7 @@ pub fn mission(board: &Board, stage: u8) -> (&'static str, String) {
             "02 / COMPLETE THE ORBIT",
             format!(
                 "Gate open. Shoot the {} orbit hard enough to carry the loop.",
-                if board.orbit.points[0].x < 122. {
+                if board.orbit.points[0].x < WIDTH / 2. {
                     "left"
                 } else {
                     "right"
@@ -547,6 +586,26 @@ pub fn mission(board: &Board, stage: u8) -> (&'static str, String) {
 mod tests {
     use super::*;
     #[test]
+    fn closed_gates_leave_a_ball_width_escape_lane() {
+        for board in ALL {
+            for (a, b) in [board.gate, board.ramp_gate] {
+                let left = (a.x + b.x) / 2. < WIDTH / 2.;
+                let end = if left { a } else { b };
+                for i in if left { [0, 7] } else { [5, 8] } {
+                    let (a, b) = board.walls[i];
+                    let ab = b - a;
+                    let t = ((end - a).dot(ab) / ab.dot(ab)).clamp(0., 1.);
+                    let clearance = (end - (a + ab * t)).len() - 2. - 1.5;
+                    assert!(
+                        clearance >= 10.,
+                        "{}: closed gate pinches outer lane ({clearance})",
+                        board.key
+                    );
+                }
+            }
+        }
+    }
+    #[test]
     fn every_scheme_has_a_unique_real_layout() {
         for (i, a) in ALL.iter().enumerate() {
             assert!(std::ptr::eq(for_scheme(a.key), *a));
@@ -564,10 +623,15 @@ mod tests {
             for rail in [b.orbit, b.ramp] {
                 assert!(rail.length > 250.);
                 for pair in rail.points.windows(2) {
-                    assert!((pair[1] - pair[0]).len() > 0.01 && (pair[1] - pair[0]).len() < 25.);
+                    assert!((pair[1] - pair[0]).len() > 0.01 && (pair[1] - pair[0]).len() < 34.);
                 }
                 for p in &rail.points {
-                    assert!(p.x >= 20. && p.x <= 205. && p.y >= 20. && p.y <= 260.);
+                    assert!(
+                        p.x >= 20. * SPACE_X
+                            && p.x <= 205. * SPACE_X
+                            && p.y >= 20. * SPACE_Y
+                            && p.y <= 260. * SPACE_Y
+                    );
                 }
                 assert!(rail.height(rail.length).abs() < 0.01);
             }

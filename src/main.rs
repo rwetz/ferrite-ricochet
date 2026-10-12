@@ -2,6 +2,7 @@
 mod audio;
 mod benchmark;
 mod board;
+mod lobby;
 mod physics;
 mod profile;
 mod records;
@@ -13,7 +14,22 @@ use gpui::{
     Subscription, Window, div, px, size,
 };
 use std::time::{Duration, Instant};
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Welcome,
+    Playing,
+    Results,
+}
 struct Ricochet {
+    screen: Screen,
+    lobby_tab: usize,
+    scores: Vec<records::Entry>,
+    rank: Option<usize>,
+    record_error: bool,
+    legacy: u64,
+    result_id: u64,
+    focus_mode: bool,
+    ui_preview: bool,
     game: physics::Game,
     audio: audio::Audio,
     palette: Entity<CommandPalette>,
@@ -25,13 +41,6 @@ struct Ricochet {
     last_frame: Instant,
     frame_pending: bool,
     _appearance: Subscription,
-}
-impl Drop for Ricochet {
-    fn drop(&mut self) {
-        if self.record_valid && !profile::enabled() {
-            records::save(self.game.board, self.game.best);
-        }
-    }
 }
 impl Focusable for Ricochet {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -57,6 +66,8 @@ impl Ricochet {
             ("Toggle attract mode", 6),
             ("New 3-ball round", 7),
             ("New 5-ball round", 8),
+            ("Choose board / welcome", 9),
+            ("Toggle table focus", 10),
         ] {
             let weak = weak.clone();
             commands.push(command(label).group("Machine").on_run(move |window, cx| {
@@ -68,6 +79,9 @@ impl Ricochet {
                             this.game.paused = !this.game.paused;
                         }
                         2 => {
+                            if this.screen != Screen::Playing {
+                                this.new_game();
+                            }
                             this.game.paused = false;
                             this.game.launch();
                         }
@@ -75,6 +89,7 @@ impl Ricochet {
                         4 => this.game.nudge(),
                         5 => this.audio.enabled = !this.audio.enabled,
                         6 => {
+                            this.screen = Screen::Playing;
                             this.demo = !this.demo;
                             if this.demo {
                                 this.record_valid = false;
@@ -84,10 +99,12 @@ impl Ricochet {
                             this.game.set_ball_limit(3);
                             this.new_game();
                         }
-                        _ => {
+                        8 => {
                             this.game.set_ball_limit(5);
                             this.new_game();
                         }
+                        9 => this.show_welcome(),
+                        _ => this.focus_mode = !this.focus_mode,
                     }
                     this.focus.focus(window, cx);
                     cx.notify();
@@ -119,26 +136,65 @@ impl Ricochet {
         );
         palette.update(cx, |p, cx| p.set_commands(commands, cx));
         focus.focus(window, cx);
+        let ui_preview = std::env::args().any(|a| a == "--preview-results");
+        let mut game = physics::Game {
+            board: initial_board,
+            ..physics::Game::default()
+        };
+        let scores = records::top(initial_board, 3);
+        game.best = scores.first().map_or(0, |e| e.score);
+        if ui_preview {
+            for _ in 0..72000 {
+                if game.balls == 0 {
+                    break;
+                }
+                if !game.live {
+                    game.charge = 0.65;
+                    game.launch();
+                }
+                game.left = (game.time * 2.3).sin() > 0.2;
+                game.right = (game.time * 1.9).cos() > 0.1;
+                game.tick(1. / 60., false);
+            }
+            assert_eq!(
+                game.balls, 0,
+                "Result preview must finish a real simulated round"
+            );
+            game.left = false;
+            game.right = false;
+        }
         Self {
-            game: physics::Game {
-                board: initial_board,
-                best: records::load(initial_board),
-                ..physics::Game::default()
+            screen: if ui_preview {
+                Screen::Results
+            } else if demo {
+                Screen::Playing
+            } else {
+                Screen::Welcome
             },
+            lobby_tab: 0,
+            scores,
+            rank: None,
+            record_error: false,
+            legacy: records::legacy_best(initial_board),
+            result_id: 1,
+            focus_mode: false,
+            ui_preview,
+            game,
             audio: audio::Audio::new(cfg!(windows) && !profile::enabled()),
             palette,
             focus,
             charging: false,
             effects: true,
             demo,
-            record_valid: !demo,
+            record_valid: !demo && !ui_preview,
             last_frame: Instant::now(),
             frame_pending: false,
             _appearance: theme::follow_system(window),
         }
     }
     fn active(&self) -> bool {
-        (!self.game.paused || self.demo)
+        self.screen == Screen::Playing
+            && (!self.game.paused || self.demo)
             && (self.demo
                 || self.game.live
                 || self.charging
@@ -199,18 +255,53 @@ impl Ricochet {
         } else if self.game.score > previous.1 {
             self.audio.play(audio::Cue::Sling);
         }
-        if was_live && !self.game.live && self.record_valid && !profile::enabled() {
-            records::save(self.game.board, self.game.best);
+        if was_live && !self.game.live && self.game.balls == 0 && !self.demo {
+            self.screen = Screen::Results;
+            self.result_id += 1;
+            self.game.left = false;
+            self.game.right = false;
+            self.charging = false;
+            self.rank = None;
+            self.record_error = false;
+            if self.record_valid && !profile::enabled() && !self.ui_preview {
+                match records::finish(&self.game) {
+                    Ok(rank) => self.rank = rank,
+                    Err(_) => self.record_error = true,
+                }
+            }
+            self.refresh_scores();
         }
+    }
+    fn refresh_scores(&mut self) {
+        self.scores = records::top(self.game.board, self.game.ball_limit);
+        self.game.best = self.scores.first().map_or(0, |e| e.score);
+        self.legacy = records::legacy_best(self.game.board);
+    }
+    fn show_welcome(&mut self) {
+        self.screen = Screen::Welcome;
+        self.game.paused = true;
+        self.game.left = false;
+        self.game.right = false;
+        self.charging = false;
+        self.demo = false;
+        self.refresh_scores();
+    }
+    fn choose_board(&mut self, index: usize, cx: &mut Context<Self>) {
+        theme::set_scheme(&SCHEMES[index], cx);
+        self.sync_table(board::for_scheme(SCHEMES[index].key));
+    }
+    fn choose_limit(&mut self, limit: u8) {
+        self.game.set_ball_limit(limit);
+        self.refresh_scores();
     }
     fn sync_table(&mut self, spec: &'static board::Board) {
         if self.game.board.key != spec.key {
-            if self.record_valid && !profile::enabled() {
-                records::save(self.game.board, self.game.best);
-            }
             self.game.set_board(spec);
-            self.game.best = records::load(spec);
+            self.refresh_scores();
             self.charging = false;
+            if self.screen == Screen::Results {
+                self.screen = Screen::Welcome;
+            }
         }
     }
     fn cycle_table(&mut self, direction: isize, window: &mut Window, cx: &mut Context<Self>) {
@@ -225,16 +316,34 @@ impl Ricochet {
         cx.notify();
     }
     fn new_game(&mut self) {
-        if self.record_valid && !profile::enabled() {
-            records::save(self.game.board, self.game.best);
-        }
-        self.game.best = records::load(self.game.board);
         self.game.reset();
+        self.refresh_scores();
+        self.screen = Screen::Playing;
         self.demo = false;
-        self.record_valid = !profile::enabled();
+        self.record_valid = !profile::enabled() && !self.ui_preview;
         self.charging = false;
+        self.rank = None;
+        self.record_error = false;
     }
     fn key(&mut self, key: &str, down: bool, held: bool) {
+        if self.screen != Screen::Playing {
+            if down && !held {
+                match key {
+                    "Return" | "enter" | "space" | "r" => self.new_game(),
+                    "escape" => self.show_welcome(),
+                    _ => {}
+                }
+            }
+            return;
+        }
+        if down && !held && key == "escape" {
+            self.show_welcome();
+            return;
+        }
+        if down && !held && key == "tab" {
+            self.focus_mode = !self.focus_mode;
+            return;
+        }
         if self.demo && down && !held && matches!(key, "q" | "e" | "space" | "r" | "n") {
             self.new_game();
         }
@@ -308,6 +417,9 @@ impl Render for Ricochet {
                     cx.notify();
                 });
             });
+        }
+        if self.screen != Screen::Playing {
+            return lobby::screen(self, window, cx);
         }
         let p = palette(cx);
         let g = &self.game;
@@ -386,7 +498,7 @@ impl Render for Ricochet {
                     } else if g.ramp_open {
                         format!(
                             "RAMP OPEN / {} SHOT",
-                            if g.board.ramp.points[0].x < 122. {
+                            if g.board.ramp.points[0].x < board::WIDTH / 2. {
                                 "LEFT"
                             } else {
                                 "RIGHT"
@@ -435,7 +547,7 @@ impl Render for Ricochet {
             .child(ascii_gauge(g.tilt.clamp(0., 1.)).label("TILT").cells(10));
         let side = div()
             .id("machine-hud")
-            .w(px(280.))
+            .w(px(260.))
             .min_h_0()
             .flex_shrink_0()
             .flex()
@@ -447,7 +559,7 @@ impl Render for Ricochet {
                 div()
                     .body(text::SM)
                     .text_color(hsla(p.fg_dim))
-                    .child(format!("{} / SERIES 03", g.board.title)),
+                    .child(format!("{} / WIDE BODY", g.board.title)),
             )
             .child(
                 div()
@@ -483,6 +595,17 @@ impl Render for Ricochet {
                             ),
                     ),
             )
+            .child(
+                Button::new("choose-board")
+                    .label("Choose board")
+                    .small()
+                    .secondary()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.show_welcome();
+                        this.focus.focus(window, cx);
+                        cx.notify();
+                    })),
+            )
             .child(instrument)
             .child(
                 div()
@@ -517,7 +640,8 @@ impl Render for Ricochet {
             .child(div().body(text::SM).text_color(hsla(p.fg_dim)).children([
                 "Q / E FLIPPERS   SPACE PLUNGER",
                 "N NUDGE  P PAUSE  R NEW  F FX",
-                "[ / ] MAP   CTRL SHIFT P MENU",
+                "[ / ] MAP   TAB TABLE FOCUS",
+                "ESC BOARDS   CTRL SHIFT P MENU",
             ]))
             .child(
                 div()
@@ -555,87 +679,100 @@ impl Render for Ricochet {
             .bg(hsla(p.sunken))
             .on_click(cx.listener(|this, _, window, cx| this.focus.focus(window, cx)))
             .child(table::table(g.clone(), effects, cx))
-            .when(g.paused || g.balls == 0, |el| {
+            .when(g.paused, |el| {
                 el.child(
                     div()
                         .absolute()
-                        .top(px(160.))
-                        .left(px(30.))
-                        .right(px(30.))
+                        .top(px(24.))
+                        .left(px(24.))
                         .bg(hsla(p.surface))
                         .p_4()
                         .display(Scale::X2, window)
                         .child(if g.paused { "PAUSED" } else { "GAME OVER" }),
                 )
             });
-        window_frame().child(power_on_in(
-            "power",
-            div()
-                .id("ricochet-root")
-                .track_focus(&self.focus)
-                .flex()
-                .flex_col()
-                .size_full()
-                .bg(hsla(p.bg))
-                .text_color(hsla(p.fg))
-                .body(text::BASE)
-                .on_action(cx.listener(|this, _: &TogglePalette, window, cx| {
-                    this.game.left = false;
-                    this.game.right = false;
-                    this.charging = false;
-                    this.game.paused = true;
-                    this.palette.update(cx, |p, cx| p.toggle(window, cx));
-                }))
-                .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, window, cx| {
-                    if !this.focus.is_focused(window) {
-                        return;
-                    }
-                    if !ev.is_held && ev.keystroke.key == "[" {
-                        this.cycle_table(-1, window, cx);
-                        return;
-                    }
-                    if !ev.is_held && ev.keystroke.key == "]" {
-                        this.cycle_table(1, window, cx);
-                        return;
-                    }
-                    this.key(&ev.keystroke.key, true, ev.is_held);
-                    cx.notify();
-                }))
-                .on_key_up(cx.listener(|this, ev: &gpui::KeyUpEvent, window, cx| {
-                    if !this.focus.is_focused(window) {
-                        return;
-                    }
-                    this.key(&ev.keystroke.key, false, false);
-                    cx.notify();
-                }))
-                .child(title_bar("Ricochet"))
-                .child(
-                    div()
-                        .flex()
-                        .flex_1()
-                        .min_h_0()
-                        .gap_4()
-                        .p_4()
-                        .child(board)
-                        .child(side),
-                )
-                .child(
-                    status_bar()
-                        .left_live(if g.paused {
-                            "PAUSED"
-                        } else if g.tilt >= 1. {
-                            "TILT / FLIPPERS DISABLED"
-                        } else {
-                            g.message
-                        })
-                        .right_live(format!(
-                            "{} HITS / {} / Q + E",
-                            g.hits,
-                            if effects { "IMPACT ON" } else { "IMPACT OFF" }
-                        )),
-                )
-                .child(self.palette.clone()),
-        ))
+        window_frame()
+            .child(power_on_in(
+                "power",
+                div()
+                    .id("ricochet-root")
+                    .track_focus(&self.focus)
+                    .flex()
+                    .flex_col()
+                    .size_full()
+                    .bg(hsla(p.bg))
+                    .text_color(hsla(p.fg))
+                    .body(text::BASE)
+                    .on_action(cx.listener(|this, _: &TogglePalette, window, cx| {
+                        this.game.left = false;
+                        this.game.right = false;
+                        this.charging = false;
+                        this.game.paused = true;
+                        this.palette.update(cx, |p, cx| p.toggle(window, cx));
+                    }))
+                    .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, window, cx| {
+                        if !this.focus.is_focused(window) {
+                            return;
+                        }
+                        if !ev.is_held && ev.keystroke.key == "[" {
+                            this.cycle_table(-1, window, cx);
+                            return;
+                        }
+                        if !ev.is_held && ev.keystroke.key == "]" {
+                            this.cycle_table(1, window, cx);
+                            return;
+                        }
+                        this.key(&ev.keystroke.key, true, ev.is_held);
+                        if ev.keystroke.key == "tab" {
+                            cx.stop_propagation();
+                        }
+                        cx.notify();
+                    }))
+                    .on_key_up(cx.listener(|this, ev: &gpui::KeyUpEvent, window, cx| {
+                        if !this.focus.is_focused(window) {
+                            return;
+                        }
+                        this.key(&ev.keystroke.key, false, false);
+                        cx.notify();
+                    }))
+                    .child(title_bar("Ricochet"))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .min_h_0()
+                            .gap_4()
+                            .p_4()
+                            .child(board)
+                            .when(!self.focus_mode, |el| el.child(side)),
+                    )
+                    .child(
+                        status_bar()
+                            .left_live(if g.paused {
+                                "PAUSED"
+                            } else if g.tilt >= 1. {
+                                "TILT / FLIPPERS DISABLED"
+                            } else {
+                                g.message
+                            })
+                            .right_live(if self.focus_mode {
+                                format!(
+                                    "{:08} / BALL {} OF {} / TAB HUD",
+                                    g.score,
+                                    (g.ball_limit + 1 - g.balls).min(g.ball_limit),
+                                    g.ball_limit
+                                )
+                            } else {
+                                format!(
+                                    "{} HITS / {} / Q + E",
+                                    g.hits,
+                                    if effects { "IMPACT ON" } else { "IMPACT OFF" }
+                                )
+                            }),
+                    )
+                    .child(self.palette.clone()),
+            ))
+            .into_any_element()
     }
 }
 fn main() {
@@ -678,7 +815,7 @@ fn main() {
         let options = chrome::remembered_window_options(
             "ricochet",
             "Ricochet",
-            size(px(1120.), px(860.)),
+            size(px(1320.), px(920.)),
             cx,
         );
         cx.open_window(options, |window, cx| {

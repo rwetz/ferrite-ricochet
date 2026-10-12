@@ -75,7 +75,7 @@ pub fn run() {
 pub fn snapshot() {
     let c = Camera::new(900., 1050.);
     let g = Game {
-        ball: crate::physics::V::new(132., 232.),
+        ball: crate::board::place(crate::physics::V::new(132., 232.)),
         left: true,
         lamps: [true, false, true],
         charge: 0.6,
@@ -147,7 +147,7 @@ pub fn snapshot_all() {
         let c = Camera::new(600., 720.);
         let g = Game {
             board,
-            ball: crate::physics::V::new(132., 282.),
+            ball: crate::board::place(crate::physics::V::new(132., 282.)),
             left: true,
             lamps: [true, false, true],
             charge: 0.6,
@@ -194,7 +194,10 @@ pub fn all() {
         let mut prepare = Vec::new();
         let mut max = 0;
         for i in 0..420 {
-            g.ball = crate::physics::V::new(40. + (i % 160) as f32, 95. + (i % 185) as f32);
+            g.ball = crate::board::place(crate::physics::V::new(
+                40. + (i % 160) as f32,
+                95. + (i % 185) as f32,
+            ));
             g.left = i % 2 == 0;
             g.right = i % 3 == 0;
             g.rail_active = i % 4 == 0;

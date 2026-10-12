@@ -89,3 +89,11 @@ The checksum-verified Windows release binary ran the same silent 20-second attra
 | Bruise | 60.000 | 2.898 | 17.370 |
 
 The added static detail increases CPU paint work: Ferrite rose from 2.207 to 2.808 ms at p95 compared with v0.3.0. Observed frame cadence remained approximately 60 FPS on every map. These are app paint observations and CPU callback timings, not asynchronous GPU completion or presentation measurements. Raw JSON is in [profiles-v0.4.0](profiles-v0.4.0/).
+
+## V5 wide boards and game flow
+
+Design-space placement expands the physical coordinates by 1.35 horizontally and 1.18 vertically, while ball radius, bumper cores, target faces and rail widths remain fixed. Cabinet/field art follows the new footprint; rear toys retain their shape and are recentered. Existing static caching remains in use. Welcome previews use the same canvas, with Ferrite develop/interlace transitions on selection and screen changes. The idle lobby does not run gameplay physics.
+
+The reported Switchyard gate pocket has a trajectory regression that escapes naturally, without invoking recovery. All twenty closed gates also pass a clearance check against outer and adjacent angled guides. Spatial ball search catches bounded bouncing as well as low-speed stalls; captures and pauses are excluded. It returns the ball to the open field above the flippers without awarding points or consuming balls.
+
+Expanded launch routing, all-map smoke replays, fast/weak rail tests, completed-round ranking isolation, atomic leaderboard replacement and weighted score totals are checked before release. Current CPU preparation measurements are in `benchmark-wide.json`. Historical native measurements above refer to their named releases, not this new geometry.

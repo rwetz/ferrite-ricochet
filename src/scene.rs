@@ -1,5 +1,5 @@
 //! Perspective geometry shared by the live GPU canvas and the CPU benchmark.
-use crate::board::{Board, Rail};
+use crate::board::{self, Board, Rail, place};
 use crate::physics::{Game, V};
 use std::f32::consts::{PI, TAU};
 #[path = "scenery.rs"]
@@ -57,8 +57,10 @@ pub struct Camera {
 }
 impl Camera {
     pub fn new(width: f32, height: f32) -> Self {
-        let eye = P3::new(122., 660., 640.);
-        let forward = P3::new(122., 175., 0.).sub(eye).unit();
+        let eye = P3::new(board::WIDTH / 2., board::HEIGHT + 280., 680.);
+        let forward = P3::new(board::WIDTH / 2., board::HEIGHT * 0.46, 0.)
+            .sub(eye)
+            .unit();
         let right = P3::new(0., 0., 1.).cross(forward).unit();
         let up = forward.cross(right).unit();
         let mut c = Self {
@@ -72,9 +74,9 @@ impl Camera {
         };
         let corners = [
             P3::new(-8., -13., 64.),
-            P3::new(252., -13., 64.),
-            P3::new(-8., 393., -24.),
-            P3::new(252., 393., -24.),
+            P3::new(board::WIDTH + 8., -13., 64.),
+            P3::new(-8., board::HEIGHT + 13., -24.),
+            P3::new(board::WIDTH + 8., board::HEIGHT + 13., -24.),
         ];
         let points = corners.map(|p| c.project(p).0);
         let mut lo = [f32::MAX; 2];
@@ -136,6 +138,14 @@ fn plate(out: &mut Vec<Face>, xy: &[V], z: f32, ink: usize) {
         ink,
         true,
     );
+}
+fn expand(faces: &mut [Face]) {
+    for f in faces {
+        for p in &mut f.points {
+            p.x *= board::SPACE_X;
+            p.y *= board::SPACE_Y;
+        }
+    }
 }
 fn rect(out: &mut Vec<Face>, x: f32, y: f32, w: f32, h: f32, z: f32, ink: usize) {
     plate(
@@ -328,11 +338,11 @@ fn etching(out: &mut Vec<Face>, board: &Board) {
     match board.design {
         0 => {
             for r in [29., 39.] {
-                ring(out, board.scoop, r, 0.7, 0.3, 4);
+                ring(out, board::unplace(board.scoop), r, 0.7, 0.3, 4);
             }
             for i in 0..16 {
                 let a = i as f32 * TAU / 16.;
-                let c = board.scoop + V::new(a.cos(), a.sin()) * 35.;
+                let c = board::unplace(board.scoop) + V::new(a.cos(), a.sin()) * 35.;
                 rect(out, c.x - 1., c.y - 1., 2., 2., 0.4, 5);
             }
         }
@@ -400,7 +410,7 @@ fn etching(out: &mut Vec<Face>, board: &Board) {
             for y in (66..224).step_by(18) {
                 rect(out, 40., y as f32, 152., 0.4, 0.3, 4);
             }
-            ring(out, board.scoop, 24., 0.6, 0.3, 5);
+            ring(out, board::unplace(board.scoop), 24., 0.6, 0.3, 5);
         }
         7 => {
             for r in [20., 31., 42., 53.] {
@@ -507,6 +517,7 @@ pub fn static_table(board: &Board) -> Vec<Face> {
     lettering(&mut m, 47., 338., 1.4, "Q", 7);
     lettering(&mut m, 164., 338., 1.4, "E", 7);
     lettering(&mut m, 91., 285., 1.1, "BALL SAVE", 5);
+    expand(&mut m);
     // Rails and raised mechanisms follow the same collision geometry as physics.
     for &(a, b) in board.walls {
         strip(&mut m, a, b, 2.2, 0., 7., 7);
@@ -524,6 +535,7 @@ pub fn static_table(board: &Board) -> Vec<Face> {
         (V::new(43., 220.), V::new(73., 257.), V::new(43., 263.)),
         (V::new(181., 220.), V::new(153., 257.), V::new(180., 263.)),
     ] {
+        let (a, b, tip) = (place(a), place(b), place(tip));
         prism(&mut m, &[a, b, tip], 0., 5., 3);
         strip(&mut m, a, b, 1.6, 5., 2., 7);
         let middle = (a + b) * 0.5;
@@ -556,9 +568,10 @@ pub fn static_table(board: &Board) -> Vec<Face> {
         (44., 314.),
         (180., 314.),
     ] {
-        cylinder(&mut m, V::new(x, y), 3., 0., 6., 7);
-        cylinder(&mut m, V::new(x, y), 1.2, 6., 0.5, 8);
+        cylinder(&mut m, place(V::new(x, y)), 3., 0., 6., 7);
+        cylinder(&mut m, place(V::new(x, y)), 1.2, 6., 0.5, 8);
     }
+    let trim_start = m.len();
     for y in [135., 165., 195., 225., 255., 285.] {
         plate(
             &mut m,
@@ -577,6 +590,7 @@ pub fn static_table(board: &Board) -> Vec<Face> {
             rect(&mut m, x, y as f32, 4., 1., 10., 4);
         }
     }
+    expand(&mut m[trim_start..]);
     rail_mesh(&mut m, board.orbit, false);
     rail_mesh(&mut m, board.ramp, true);
     for t in board.targets {
@@ -596,6 +610,7 @@ pub fn static_table(board: &Board) -> Vec<Face> {
     cylinder(&mut m, board.scoop, 12., 0., 1.5, 5);
     cylinder(&mut m, board.scoop, 8.5, 1.6, 0.5, 3);
     // Front apron plate and plunger assembly.
+    let apron_start = m.len();
     rect(&mut m, 44., 350., 151., 16., 0.3, 3);
     lettering(
         &mut m,
@@ -615,6 +630,7 @@ pub fn static_table(board: &Board) -> Vec<Face> {
         6,
     );
     cylinder(&mut m, V::new(212., 373.), 5., 0., 4., 7);
+    expand(&mut m[apron_start..]);
     scenery::decorate(&mut m, board);
     m
 }
@@ -762,7 +778,7 @@ pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
     }
     for i in 0..2 {
         let (a, b) = g.flipper(i);
-        let d = (b - a) * (1. / 37.);
+        let d = (b - a) * (1. / board::FLIPPER_LENGTH);
         let n = V::new(-d.y, d.x);
         let mut outline = Vec::with_capacity(16);
         for j in 0..8 {
@@ -837,13 +853,14 @@ pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
     for i in 0..3 {
         cylinder(
             &mut m,
-            V::new(95. + i as f32 * 16., 273.),
+            place(V::new(95. + i as f32 * 16., 273.)),
             3.,
             0.,
             0.5,
             if g.lamps[i] { 10 } else { 5 },
         );
     }
+    let charge_start = m.len();
     for i in 0..8 {
         rect(
             &mut m,
@@ -855,6 +872,7 @@ pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
             if g.charge > i as f32 / 8. { 10 } else { 4 },
         );
     }
+    expand(&mut m[charge_start..]);
     m
 }
 pub fn project_sorted(camera: &Camera, faces: &[Face]) -> Vec<Projected> {

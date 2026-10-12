@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+- Expanded every physical table by 35% in width and 18% in length while retaining ball, bumper and target sizes. Tuned flippers, launcher routing and camera framing for the larger field.
+- Added an animated welcome screen with board previews, machine selection, round modes, local rankings and scoring rules.
+- Replaced the game-over strip with completed-round results, score breakdown, leaderboard rank, replay and board selection.
+- Introduced V5 scoring with separate top-five leaderboards per board and three/five-ball mode. Only completed player rounds rank; legacy records remain visible separately.
+- Removed the reported Switchyard closed-gate pocket, added clearance checks and spatial ball-search recovery. Added collision rules for future models.
+- Added Tab table-focus mode and Escape navigation to the welcome screen.
+
 ## 0.4.1
 - Bundled native measurements for all ten decorated maps: approximately 60 observed FPS, no measured paint intervals above 20 ms and at most 3.069 ms p95 CPU paint time on the test machine.
 

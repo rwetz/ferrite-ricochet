@@ -3,7 +3,7 @@
 //! These meshes are built once and share the live scene's palette materials.
 use super::{Face, P3, face, lettering, plate, prism, rect, ring, strip};
 use crate::{
-    board::Board,
+    board::{self, Board, place},
     physics::{Game, V},
 };
 use std::f32::consts::TAU;
@@ -850,8 +850,8 @@ fn cabinet_detail(m: &mut Vec<Face>, board: &Board) {
     }
     // Shot arrows are flush inlays adjacent to the actual rail mouths.
     for (entry, label) in [
-        (board.orbit.points[0], "ORBIT"),
-        (board.ramp.points[0], "RAMP"),
+        (board::unplace(board.orbit.points[0]), "ORBIT"),
+        (board::unplace(board.ramp.points[0]), "RAMP"),
     ] {
         let x = entry.x;
         if !(55. ..170.).contains(&x) {
@@ -869,12 +869,23 @@ fn cabinet_detail(m: &mut Vec<Face>, board: &Board) {
 }
 
 pub(super) fn decorate(m: &mut Vec<Face>, board: &Board) {
+    let trim_start = m.len();
     cabinet_detail(m, board);
     field_emblem(m, board.design);
+    super::expand(&mut m[trim_start..]);
     for &c in board.bumpers {
         badge(m, c, board.design);
     }
-    block(m, V::new(122., 7.), 167., 16., 0.8, 4., 3);
+    block(
+        m,
+        place(V::new(122., 7.)),
+        167. * board::SPACE_X,
+        16. * board::SPACE_Y,
+        0.8,
+        4.,
+        3,
+    );
+    let toy_start = m.len();
     match board.design {
         0 => ferrous(m),
         1 => monolith(m),
@@ -887,9 +898,17 @@ pub(super) fn decorate(m: &mut Vec<Face>, board: &Board) {
         8 => oxide(m),
         _ => blackout(m),
     }
+    // Center the existing toys on the wider rear shelf, retaining their shapes.
+    let shelf = place(V::new(122., 7.));
+    for f in &mut m[toy_start..] {
+        for p in &mut f.points {
+            p.x += shelf.x - 122.;
+            p.y += shelf.y - 7.;
+        }
+    }
     // Mechanical score lamps on a front-facing strip, lit only by progression.
     for x in [43., 48., 53., 191., 196., 201.] {
-        block(m, V::new(x, 16.), 3.4, 1.4, 4.8, 3.4, 4);
+        block(m, place(V::new(x, 16.)), 3.4, 1.4, 4.8, 3.4, 4);
     }
 }
 pub(super) fn progress_lights(m: &mut Vec<Face>, g: &Game) {
@@ -906,13 +925,14 @@ pub(super) fn progress_lights(m: &mut Vec<Face>, g: &Game) {
                     },
             ),
         ] {
+            let c = place(V::new(x, 16.));
             face(
                 m,
                 vec![
-                    P3::new(x - 1., 16.8, 5.5),
-                    P3::new(x + 1., 16.8, 5.5),
-                    P3::new(x + 1., 16.8, 7.5),
-                    P3::new(x - 1., 16.8, 7.5),
+                    P3::new(c.x - 1., c.y + 0.8, 5.5),
+                    P3::new(c.x + 1., c.y + 0.8, 5.5),
+                    P3::new(c.x + 1., c.y + 0.8, 7.5),
+                    P3::new(c.x - 1., c.y + 0.8, 7.5),
                 ],
                 if on { 10 } else { 5 },
                 false,

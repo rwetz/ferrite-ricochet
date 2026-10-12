@@ -1,3 +1,4 @@
+use crate::board::{self, place};
 use std::ops::{Add, Mul, Sub};
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct V {
@@ -87,12 +88,16 @@ pub struct Game {
     pub combo: u32,
     pub combo_left: f32,
     pub save_left: f32,
+    pub score_parts: [u64; 4],
+    pub recoveries: u32,
+    pub(crate) stuck_anchor: V,
+    pub(crate) stuck_time: f32,
 }
 impl Default for Game {
     fn default() -> Self {
         Self {
             board: &crate::board::FERRITE,
-            ball: V::new(212., 329.),
+            ball: board::SHOOTER,
             vel: V::default(),
             score: 0,
             best: 0,
@@ -136,6 +141,10 @@ impl Default for Game {
             combo: 0,
             combo_left: 0.,
             save_left: 0.,
+            score_parts: [0; 4],
+            recoveries: 0,
+            stuck_anchor: board::SHOOTER,
+            stuck_time: 0.,
         }
     }
 }
@@ -162,8 +171,10 @@ impl Game {
             self.reset();
         }
     }
-    fn add_score(&mut self, base: u64) {
-        self.score += base * self.multiplier * if self.overdrive > 0. { 2 } else { 1 };
+    fn add_score(&mut self, base: u64, part: usize) {
+        let points = base * self.multiplier * if self.overdrive > 0. { 2 } else { 1 };
+        self.score += points;
+        self.score_parts[part] += points;
     }
     pub fn active_rail(&self) -> &'static std::sync::LazyLock<crate::board::Rail> {
         match self.rail_kind {
@@ -185,7 +196,7 @@ impl Game {
             self.rail_active = false;
             if self.rail_kind == RailKind::Ramp {
                 self.ramp_runs += 1;
-                self.add_score(500 + 100 * self.ramp_runs as u64);
+                self.add_score(1500 + 250 * self.ramp_runs as u64, 2);
                 self.jackpot_ready = true;
                 self.ramp_open = false;
                 self.drops = [false; 3];
@@ -194,7 +205,7 @@ impl Game {
                 self.message = "CROSSOVER COMPLETE / JACKPOT LIT";
             } else if self.mission == 1 {
                 self.mission = 2;
-                self.add_score(750);
+                self.add_score(1000, 2);
                 self.shaking = 0.6;
                 self.message = "ORBIT COMPLETE / REACTOR OPEN";
             }
@@ -222,11 +233,11 @@ impl Game {
         if self.board.order[self.target_progress as usize] == i {
             self.drops[i] = true;
             self.target_progress += 1;
-            self.add_score(125);
+            self.add_score(150, 1);
             self.message = "TARGET DOWN / KEEP THE SEQUENCE";
             if self.target_progress == 3 {
                 self.ramp_open = true;
-                self.add_score(400);
+                self.add_score(500, 1);
                 self.message = "TARGET BANK COMPLETE / CROSSOVER OPEN";
             }
         } else {
@@ -238,7 +249,7 @@ impl Game {
     }
     pub fn launch(&mut self) {
         if !self.live && self.balls > 0 && !self.paused {
-            self.vel = V::new(-12., -400. - self.charge * 140.);
+            self.vel = V::new(-12., -445. - self.charge * 160.);
             self.live = true;
             self.charge = 0.;
             self.save_left = 6.;
@@ -252,16 +263,24 @@ impl Game {
             if self.tilt > 1. {
                 self.message = "TILT / FLIPPERS DISABLED";
             } else {
-                self.vel = self.vel + V::new(if self.ball.x < 112. { 65. } else { -65. }, -85.);
+                self.vel = self.vel
+                    + V::new(
+                        if self.ball.x < board::WIDTH / 2. {
+                            65.
+                        } else {
+                            -65.
+                        },
+                        -85.,
+                    );
                 self.message = "NUDGE";
             }
         }
     }
     pub fn flipper(&self, i: usize) -> (V, V) {
-        let a = V::new(if i == 0 { 68. } else { 158. }, 307.);
+        let a = board::flipper_pivot(i);
         (
             a,
-            a + V::new(self.angles[i].cos(), self.angles[i].sin()) * 37.,
+            a + V::new(self.angles[i].cos(), self.angles[i].sin()) * board::FLIPPER_LENGTH,
         )
     }
     pub fn step(&mut self, dt: f32) {
@@ -330,14 +349,30 @@ impl Game {
         }
         if self.rail_active {
             self.rail_step(dt);
+            self.ball_search(dt);
             return;
         }
         self.vel.y += dt * 260.;
         self.vel = self.vel * (1. - dt * 0.07);
         let previous_ball = self.ball;
         self.ball = self.ball + self.vel * dt;
-        if self.ball.x > 202. && self.ball.y < 68. && self.vel.y < 0. {
-            self.vel = V::new(-180., -75.);
+        if self.ball.x > 202. * board::SPACE_X
+            && self.ball.y < 53. * board::SPACE_Y
+            && self.vel.y < 0.
+        {
+            // Clear the diagonal shooter guide before redirecting. The authored
+            // upper core determines the launch chute's angle on each machine.
+            let aim = self
+                .board
+                .bumpers
+                .iter()
+                .min_by(|a, b| a.y.total_cmp(&b.y))
+                .unwrap();
+            let flight = ((self.ball.x - aim.x) / 215.).max(0.2);
+            self.vel = V::new(
+                -215.,
+                (aim.y - self.ball.y - 130. * flight * flight) / flight,
+            );
         }
         for i in 0..3 {
             if (previous_ball.y - self.board.lanes[i].y) * (self.ball.y - self.board.lanes[i].y)
@@ -347,10 +382,10 @@ impl Game {
             {
                 self.rollovers[i] = true;
                 self.lane_flash[i] = 1.;
-                self.add_score(50);
-                self.message = "ROLLOVER / +50";
+                self.add_score(75, 0);
+                self.message = "ROLLOVER / +75";
                 if self.rollovers.iter().all(|v| *v) {
-                    self.add_score(250);
+                    self.add_score(500, 1);
                     self.rollovers = [false; 3];
                     self.message = "LANES COMPLETE / +250";
                 }
@@ -397,7 +432,7 @@ impl Game {
                 let sling = index - 9;
                 if l < 6. && incoming && self.slings[sling] <= 0. {
                     self.vel = self.vel + V::new(if sling == 0 { 95. } else { -95. }, -120.);
-                    self.add_score(25);
+                    self.add_score(25, 0);
                     self.slings[sling] = 0.15;
                     self.shaking = 0.35;
                     self.message = "SLING / +25";
@@ -439,14 +474,14 @@ impl Game {
                     self.vel = self.vel - n * (2. * self.vel.dot(n)) + n * 105.;
                     self.combo = (self.combo + 1).min(5);
                     self.combo_left = 2.5;
-                    self.add_score(100 * self.combo as u64);
+                    self.add_score(100 * self.combo as u64, 0);
                     self.hits += 1;
                     self.flash[i] = 1.;
                     self.shaking = 0.65;
                     self.lamps[i] = true;
                     self.message = "BUMPER / +100";
                     if self.lamps.iter().all(|x| *x) {
-                        self.add_score(500);
+                        self.add_score(750, 1);
                         self.multiplier = (self.multiplier + 1).min(5);
                         self.lamps = [false; 3];
                         self.message = "BANK COMPLETE / MULTIPLIER UP";
@@ -459,7 +494,7 @@ impl Game {
             }
         }
         if self.jackpot_ready && (self.ball - self.board.scoop).len() < 9. {
-            self.add_score(2500 + 500 * self.ramp_runs as u64);
+            self.add_score(5000 + 1000 * self.ramp_runs as u64, 3);
             self.jackpots += 1;
             self.jackpot_ready = false;
             self.scoop_left = 0.6;
@@ -473,30 +508,31 @@ impl Game {
             self.scoop_left = 0.8;
             self.scoop_rewards_overdrive = true;
             self.completed_cycles += 1;
-            self.add_score(1000);
+            self.add_score(2000, 3);
             self.vel = V::default();
             self.shaking = 0.8;
             self.message = "REACTOR CAPTURE / OVERDRIVE";
         }
         let speed = self.vel.len();
-        if speed > 620. {
-            self.vel = self.vel * (620. / speed);
+        if speed > 720. {
+            self.vel = self.vel * (720. / speed);
         }
         self.best = self.best.max(self.score);
-        if self.ball.y > 373. && self.save_left > 0. {
-            self.ball = V::new(212., 329.);
-            self.vel = V::new(-12., -500.);
+        self.ball_search(dt);
+        if self.ball.y > board::DRAIN_Y && self.save_left > 0. {
+            self.ball = board::SHOOTER;
+            self.vel = V::new(-12., -560.);
             self.save_left = 0.;
             self.trail.clear();
             self.message = "BALL SAVED / BACK IN PLAY";
             return;
         }
-        if self.ball.y > 373. {
+        if self.ball.y > board::DRAIN_Y {
             self.combo = 0;
             self.combo_left = 0.;
             self.balls = self.balls.saturating_sub(1);
             self.live = false;
-            self.ball = V::new(212., 329.);
+            self.ball = board::SHOOTER;
             self.vel = V::default();
             self.trail.clear();
             self.tilt = 0.;
@@ -505,6 +541,29 @@ impl Game {
             } else {
                 "DRAIN / HOLD SPACE"
             };
+        }
+    }
+    fn ball_search(&mut self, dt: f32) {
+        // Monitor spatial progress, not speed. A ball can bounce quickly inside
+        // a tiny pocket forever. Normal captures/rail travel bypass this code.
+        if (self.ball - self.stuck_anchor).len() > 12. {
+            self.stuck_anchor = self.ball;
+            self.stuck_time = 0.;
+        } else {
+            self.stuck_time += dt;
+        }
+        if self.stuck_time > 3. {
+            let left = self.ball.x < board::WIDTH / 2.;
+            // Recover onto the apron-side open field, above the flippers and
+            // below all map-specific targets. No score or ball is consumed.
+            self.ball = place(V::new(if left { 92. } else { 134. }, 282.));
+            self.vel = V::new(if left { 40. } else { -40. }, 80.);
+            self.stuck_anchor = self.ball;
+            self.stuck_time = 0.;
+            self.recoveries += 1;
+            self.rail_active = false;
+            self.trail.clear();
+            self.message = "BALL SEARCH / BACK IN PLAY";
         }
     }
     fn collide(&mut self, a: V, b: V, r: f32, restitution: f32, surface: V) {
@@ -544,6 +603,81 @@ impl Game {
 mod tests {
     use super::*;
     #[test]
+    fn reported_switchyard_gate_pocket_now_releases_naturally() {
+        let start = place(V::new(28., 244.));
+        let mut g = Game {
+            board: &board::CONCRETE,
+            live: true,
+            ball: start,
+            save_left: 0.,
+            ..Game::default()
+        };
+        for _ in 0..480 {
+            g.step(1. / 240.);
+        }
+        assert!((g.ball - start).len() > 30. || !g.live);
+        assert_eq!(
+            g.recoveries, 0,
+            "Known pocket should be removed, not hidden by ball search"
+        );
+    }
+    #[test]
+    fn ball_search_recovers_a_spatially_trapped_fast_bounce_without_awards() {
+        let mut g = Game {
+            live: true,
+            ball: place(V::new(45., 240.)),
+            score: 1234,
+            ..Game::default()
+        };
+        g.stuck_anchor = g.ball;
+        for i in 0..800 {
+            g.ball = g.stuck_anchor + V::new(if i % 2 == 0 { 2. } else { -2. }, 0.);
+            g.vel = V::new(200., 0.);
+            g.ball_search(1. / 240.);
+            if g.recoveries > 0 {
+                break;
+            }
+        }
+        assert_eq!(g.recoveries, 1);
+        assert_eq!(g.score, 1234);
+        assert_eq!(g.balls, 3);
+        assert_eq!(g.ball, place(V::new(92., 282.)));
+    }
+    #[test]
+    fn captures_and_pauses_do_not_trigger_ball_search() {
+        let mut g = Game {
+            live: true,
+            paused: true,
+            stuck_time: 2.99,
+            ..Game::default()
+        };
+        for _ in 0..400 {
+            g.step(1. / 240.);
+        }
+        assert_eq!(g.recoveries, 0);
+        g.paused = false;
+        g.scoop_left = 0.8;
+        g.ball = g.board.scoop;
+        for _ in 0..100 {
+            g.step(1. / 240.);
+        }
+        assert_eq!(g.recoveries, 0);
+    }
+    #[test]
+    fn score_breakdown_includes_multipliers_and_sums_to_total() {
+        let mut g = Game {
+            multiplier: 3,
+            overdrive: 10.,
+            ..Game::default()
+        };
+        g.add_score(100, 0);
+        g.add_score(150, 1);
+        g.add_score(1000, 2);
+        g.add_score(5000, 3);
+        assert_eq!(g.score, 37500);
+        assert_eq!(g.score, g.score_parts.iter().sum::<u64>());
+    }
+    #[test]
     fn launched_ball_survives_and_scores() {
         let mut g = Game {
             charge: 1.,
@@ -564,7 +698,7 @@ mod tests {
         for _ in 0..3 {
             g.launch();
             g.save_left = 0.;
-            g.ball = V::new(112., 380.);
+            g.ball = place(V::new(112., 380.));
             g.step(1. / 240.);
         }
         assert_eq!(g.balls, 0);
@@ -590,7 +724,7 @@ mod tests {
         let mut g = Game {
             live: true,
             left: true,
-            ball: V::new(94., 312.),
+            ball: place(V::new(94., 312.)),
             vel: V::new(0., 40.),
             ..Game::default()
         };
@@ -603,7 +737,7 @@ mod tests {
     fn launch_lane_cannot_award_sling_points() {
         let mut g = Game {
             live: true,
-            ball: V::new(212., 245.),
+            ball: place(V::new(212., 245.)),
             vel: V::new(0., -80.),
             ..Game::default()
         };
@@ -617,7 +751,7 @@ mod tests {
         let mut entered = false;
         for _ in 0..400 {
             g.tick(1. / 120., false);
-            entered |= g.live && g.ball.x < 195.;
+            entered |= g.live && g.ball.x < 195. * board::SPACE_X;
         }
         assert!(entered, "even a quick press must feed the table");
     }
@@ -625,12 +759,12 @@ mod tests {
     fn early_drain_saves_once() {
         let mut g = Game::default();
         g.launch();
-        g.ball = V::new(112., 380.);
+        g.ball = place(V::new(112., 380.));
         g.step(1. / 240.);
         assert_eq!(g.balls, 3);
         assert!(g.live);
         assert_eq!(g.save_left, 0.);
-        g.ball = V::new(112., 380.);
+        g.ball = place(V::new(112., 380.));
         g.step(1. / 240.);
         assert_eq!(g.balls, 2);
     }
@@ -638,15 +772,15 @@ mod tests {
     fn rollover_crossing_scores_once() {
         let mut g = Game {
             live: true,
-            ball: V::new(107., 53.8),
+            ball: place(V::new(107., 53.8)),
             vel: V::new(0., 100.),
             ..Game::default()
         };
         g.step(1. / 240.);
-        assert_eq!(g.score, 50);
+        assert_eq!(g.score, 75);
         assert!(g.rollovers[1]);
         g.step(1. / 240.);
-        assert_eq!(g.score, 50);
+        assert_eq!(g.score, 75);
     }
     #[test]
     fn combo_expires_without_a_hit() {
