@@ -1,0 +1,9 @@
+{
+  "board": "ferrite",
+  "version": 2,
+  "triangles": 3242,
+  "sha256": "dd1f2c4feea3943eaff08a8ec6c873342c548a9004fa0dfe33173bdb9af01e1b",
+  "validation": "passed",
+  "runtime_verified": false,
+  "source": "Blender MCP, scripts/blender/create_ferrous.py revision=2"
+}

@@ -7,3 +7,4 @@
 /idle.py
 /contacts.py
 *.log
+__pycache__/

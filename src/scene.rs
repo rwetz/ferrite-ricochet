@@ -2,6 +2,8 @@
 use crate::board::{self, Board, Rail, place};
 use crate::physics::{Game, V};
 use std::f32::consts::{PI, TAU};
+#[path = "board_assets.rs"]
+mod board_assets;
 #[path = "scenery.rs"]
 mod scenery;
 #[derive(Clone, Copy, Debug, Default)]
@@ -632,6 +634,7 @@ pub fn static_table(board: &Board) -> Vec<Face> {
     cylinder(&mut m, V::new(212., 373.), 5., 0., 4., 7);
     expand(&mut m[apron_start..]);
     scenery::decorate(&mut m, board);
+    board_assets::append(&mut m, board.key);
     m
 }
 pub fn dynamic_table(g: &Game, effects: bool) -> Vec<Face> {
