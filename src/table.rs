@@ -44,7 +44,7 @@ pub fn table(g: Game, effects: bool, cx: &gpui::App) -> impl IntoElement {
                         let threshold = BAYER[y % 4][x % 4];
                         let mut c = if x % 24 == 0 && y % 24 == 0 { 2 } else { 0 };
                         // Dithered outer apron and stamped ribs, never a gradient.
-                        if !(18..=224).contains(&x) || y < 18 || y > 360 {
+                        if !(18..=224).contains(&x) || !(18..=360).contains(&y) {
                             c = if threshold < 5 { 2 } else { 1 };
                         }
                         if (32..190).contains(&x) && (32..205).contains(&y) && threshold == 0 {

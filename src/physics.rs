@@ -162,10 +162,10 @@ impl Game {
         for (a, b) in WALLS {
             self.collide(a, b, 2., 0.82, V::default());
         }
-        for i in 0..2 {
+        for (i, previous) in old.iter().enumerate() {
             let (a, b) = self.flipper(i);
             let arm = self.ball - a;
-            let omega = (self.angles[i] - old[i]) / dt;
+            let omega = (self.angles[i] - previous) / dt;
             self.collide(a, b, 3., 0.83, V::new(-arm.y * omega, arm.x * omega));
         }
         for (i, c) in BUMPERS.iter().enumerate() {

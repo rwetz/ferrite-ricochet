@@ -181,21 +181,23 @@ impl Render for Ricochet {
                         "CTRL SHIFT P   COMMANDS",
                     ]),
                 ))
-                .child(Button::new("new-game", "New game").on_click(cx.listener(
-                    |this, _, window, cx| {
-                        this.game.reset();
-                        this.focus.focus(window, cx);
-                        cx.notify();
-                    },
-                )))
                 .child(
-                    Button::new("pause", if g.paused { "Resume" } else { "Pause" }).on_click(
-                        cx.listener(|this, _, window, cx| {
+                    Button::new("new-game")
+                        .label("New game")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.game.reset();
+                            this.focus.focus(window, cx);
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("pause")
+                        .label(if g.paused { "Resume" } else { "Pause" })
+                        .on_click(cx.listener(|this, _, window, cx| {
                             this.game.paused = !this.game.paused;
                             this.focus.focus(window, cx);
                             cx.notify();
-                        }),
-                    ),
+                        })),
                 );
         let board = div()
             .id("table")
