@@ -457,7 +457,7 @@ impl Render for Ricochet {
                     .child(format!("BEST  {:08}", g.best)),
             )
             .child(div().display(Scale::X1, window).child(format!(
-                "BALL {} / {}       {}X BANK",
+                "BALL {}/{}   BANK {}X",
                 (g.ball_limit + 1 - g.balls).min(g.ball_limit),
                 g.ball_limit,
                 g.multiplier
@@ -532,7 +532,7 @@ impl Render for Ricochet {
                 div()
                     .body(text::SM)
                     .text_color(hsla(p.fg_dim))
-                    .child("100 EACH / +500 BANK"),
+                    .child("100 EACH / +750 BANK"),
             )
             .child(ascii_rule(Some("RETURN LANES")))
             .child(lights(g.rollovers))
@@ -540,7 +540,7 @@ impl Render for Ricochet {
                 div()
                     .body(text::SM)
                     .text_color(hsla(p.fg_dim))
-                    .child("50 EACH / +250 BANK"),
+                    .child("75 EACH / +500 BANK"),
             )
             .child(ascii_rule(Some("MACHINE")))
             .child(ascii_gauge(g.charge).label("PULL").cells(10))
@@ -549,6 +549,8 @@ impl Render for Ricochet {
             .id("machine-hud")
             .w(px(260.))
             .min_h_0()
+            // Short windows scroll the readouts instead of cutting them off.
+            .overflow_y_scroll()
             .flex_shrink_0()
             .flex()
             .flex_col()

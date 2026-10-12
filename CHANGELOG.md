@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+- The machine readouts scroll in short windows instead of being cut off.
+
+## 0.5.2
+- Kept the ball/bank HUD row on one line in the narrower instrument panel and synchronized its scoring captions with V5 awards.
+
 ## 0.5.1
 - Gave animated machine previews explicit viewport dimensions after native inspection exposed a collapsed animation wrapper.
 
