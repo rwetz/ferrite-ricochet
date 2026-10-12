@@ -31,3 +31,10 @@ This renderer is a fixed-camera 3D mesh renderer inside GPUI, with painter-order
 
 ## Progressive table pass
 Ferrite now has an elevated sampled Bezier orbit, a physical gate, a staged reactor scoop and a 20-second overdrive. The rail simulation conserves forward/rollback momentum under table gravity and drag. A fast shot completes; a weak one stalls and rolls back. Three- and five-ball rounds are selectable. Other themes currently resolve to the authored Ferrite board, with a stable board-identity/cache seam ready for future layouts.
+
+## Verified live result after frame-clock correction
+On Windows with a Ryzen 7 9800X3D, the 20-second native session (two-second warmup excluded) recorded 1,081 measured frames, 60.003 observed FPS, p95 paint interval 17.274 ms and no interval above 20 ms. Table CPU paint time was 1.578 ms at p95 and 2.004 ms maximum, with up to 1,800 submitted paths. The first live mesh candidate had measured 32.470 observed FPS and 33.756 ms p95 intervals. The frame-clock correction therefore addressed a separate scheduling ceiling as well as the raster bottleneck.
+
+The progressive table’s standalone replay measured 5.561 ms mean / 6.056 ms p95 for the old native raster versus 0.058 ms mean / 0.077 ms p95 for dynamic mesh preparation. Full-table static geometry is built once, and contains 2,506 faces. These CPU preparation timings exclude tessellation/GPU submission and are not a FPS multiplier.
+
+The native run used the remembered default window size, effects on, the Ferrite dark scheme and silent attract mode. Frame cadence remains an app paint observation, rather than a hardware GPU presentation measurement. Other software on this machine and different window sizes can change the results. Raw files: `native-profile-before-frame-clock.json`, `native-profile-frame-clock.json`, `benchmark-progressive.json`.

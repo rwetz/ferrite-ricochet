@@ -274,23 +274,14 @@ impl Render for Ricochet {
                         .child(format!("[{}{}]", i + 1, if on { "*" } else { "-" }))
                 }))
         };
-        let side = div()
-            .id("machine-hud")
-            .w(px(280.))
-            .flex_shrink_0()
+        let instrument = div()
+            .id("instrument-scroll")
+            .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .flex()
             .flex_col()
             .gap_2()
-            .p_2()
-            .child(div().display(Scale::X2, window).child("RICOCHET"))
-            .child(
-                div()
-                    .body(text::SM)
-                    .text_color(hsla(p.fg_dim))
-                    .child(format!("{} / SERIES 02", g.board.title)),
-            )
             .child(ascii_rule(Some("SCORE")))
             .child(
                 div()
@@ -376,14 +367,28 @@ impl Render for Ricochet {
                     } else {
                         "Q + E / KEEP IT ALIVE".into()
                     }),
+            );
+        let side = div()
+            .id("machine-hud")
+            .w(px(280.))
+            .min_h_0()
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_2()
+            .child(div().display(Scale::X2, window).child("RICOCHET"))
+            .child(
+                div()
+                    .body(text::SM)
+                    .text_color(hsla(p.fg_dim))
+                    .child(format!("{} / SERIES 02", g.board.title)),
             )
-            .child(div().flex_1())
+            .child(instrument)
             .child(div().body(text::SM).text_color(hsla(p.fg_dim)).children([
-                "Q / E    Hold flippers",
-                "SPACE    Pull / release plunger",
-                "N  Nudge   P  Pause   F  Effects",
-                "R  Restart   CTRL SHIFT P  Menu",
-                "M  Sound (Windows)",
+                "Q / E FLIPPERS   SPACE PLUNGER",
+                "N NUDGE  P PAUSE  R NEW  F FX",
+                "CTRL SHIFT P / ROUNDS & THEMES",
             ]))
             .child(
                 div()
