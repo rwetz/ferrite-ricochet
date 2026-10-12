@@ -70,3 +70,22 @@ All ten shipped maps also passed deterministic launch replays. Automated checks 
 Ten authored centerpieces, bumper hardware, cabinet service plates, vents, rivets, playfield emblems and stencils are built into the existing mesh renderer. There are no new image uploads, asset downloads or continuously animated decorative simulations. Raised toys sit outside the playable field; the new playfield artwork is flush. The camera reserves space for the taller silhouettes, and the same projection/bounds checks cover every new face.
 
 The standalone all-map render fixture measured fewer than 4,400 static faces per layout, below 0.7 ms for one-time geometry construction/projection and below 0.07 ms p95 for dynamic preparation on this machine. Static geometry is cached at the native window's size. The only new per-frame geometry is six small progression lamps. Raw CPU fixture measurements are in `benchmark-decorations.json`; these preparation timings exclude native tessellation, submission and GPU presentation.
+
+### Shipped v0.4.0: decorative meshes in native play
+
+The checksum-verified Windows release binary ran the same silent 20-second attract scenario for every map, excluding two seconds of warmup. The viewport remained 672 x 732 logical pixels at 150% display scale on the Ryzen 7 9800X3D machine. Each map produced 1,081 measured frames and zero paint intervals above 20 ms.
+
+| Scheme | Observed FPS | CPU paint p95 (ms) | Paint interval p95 (ms) |
+| --- | ---: | ---: | ---: |
+| Ferrite | 60.000 | 2.808 | 17.268 |
+| Mono | 60.001 | 2.830 | 17.271 |
+| Graphite | 60.002 | 2.869 | 17.253 |
+| Slate | 60.001 | 2.856 | 17.265 |
+| Concrete | 60.003 | 2.840 | 17.220 |
+| Harbor | 60.000 | 2.719 | 17.237 |
+| Cyanotype | 60.000 | 2.917 | 17.204 |
+| Phosphor | 59.998 | 3.069 | 17.284 |
+| Verdigris | 60.001 | 2.828 | 17.349 |
+| Bruise | 60.000 | 2.898 | 17.370 |
+
+The added static detail increases CPU paint work: Ferrite rose from 2.207 to 2.808 ms at p95 compared with v0.3.0. Observed frame cadence remained approximately 60 FPS on every map. These are app paint observations and CPU callback timings, not asynchronous GPU completion or presentation measurements. Raw JSON is in [profiles-v0.4.0](profiles-v0.4.0/).

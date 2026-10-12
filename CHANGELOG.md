@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.1
+- Bundled native measurements for all ten decorated maps: approximately 60 observed FPS, no measured paint intervals above 20 ms and at most 3.069 ms p95 CPU paint time on the test machine.
+
 ## 0.4.0
 - Added ten bespoke 3D cabinet centerpieces: a flywheel gantry, monoliths, hydraulic press, lighthouse, locomotive, dock crane and cargo ship, wireframe drafting rig, reactor coils, oxidized pump and lightning sculpture with speaker stacks.
 - Added theme-specific bumper rim hardware, playfield emblems, stenciled aprons, service hatches, vents, rivets and shot inlays.
