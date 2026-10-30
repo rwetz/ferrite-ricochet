@@ -74,3 +74,12 @@ The maps also have their own 3D cabinet toys and artwork. Ferrous carries a stee
 The current assets are procedural polygon meshes in Rust, with actual 3D positions, camera projection and quantized Ferrite palette materials. They are not imported GLB/FBX files and do not use PBR textures or a general-purpose depth buffer. Blender would be a better authoring workflow for more intricate toys, but the game needs a model-import path before those files can replace these meshes. Decorative render meshes and simple authored collision geometry must remain separate. See `AGENTS.md` for gate-clearance and trajectory requirements.
 
 `--preview-results` finishes a real simulated round and opens its result view for UI inspection without saving scores.
+
+---
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/heptagram-white.svg">
+    <img src="docs/brand/heptagram-black.svg" alt="heptagram" width="48">
+  </picture>
+</p>
