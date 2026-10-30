@@ -1,5 +1,20 @@
-# Ricochet
-A native Ferrite pinball machine with a perspective 3D cabinet, raised mechanisms, machined steel and ASCII instruments. Built with Rust and GPUI. No webview.
+<p align="center">
+  <img src="assets/logo.svg" width="128" height="128" alt="Ricochet logo">
+</p>
+
+<h1 align="center">Ricochet</h1>
+
+<p align="center">
+  A native Ferrite pinball machine with a perspective 3D cabinet and ASCII instruments.
+</p>
+
+<p align="center">
+  <a href="https://github.com/rwetz/ferrite-ricochet/actions/workflows/ci.yml"><img src="https://github.com/rwetz/ferrite-ricochet/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/rwetz/ferrite-ricochet/releases/latest"><img src="https://img.shields.io/github/v/release/rwetz/ferrite-ricochet?color=F2A93B&labelColor=18181B" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-3D3D42?labelColor=18181B" alt="License"></a>
+</p>
+
+![Ricochet welcome screen](docs/welcome.jpg)
 
 ## Play
 Choose a machine on the animated welcome screen, select a three- or five-ball round, and press **Start round** or **Enter**. The preview switches with the board and Ferrite theme. The Scores and Rules tabs show local rankings and the scoring guide.
@@ -74,6 +89,22 @@ The maps also have their own 3D cabinet toys and artwork. Ferrous carries a stee
 The current assets are procedural polygon meshes in Rust, with actual 3D positions, camera projection and quantized Ferrite palette materials. They are not imported GLB/FBX files and do not use PBR textures or a general-purpose depth buffer. Blender would be a better authoring workflow for more intricate toys, but the game needs a model-import path before those files can replace these meshes. Decorative render meshes and simple authored collision geometry must remain separate. See `AGENTS.md` for gate-clearance and trajectory requirements.
 
 `--preview-results` finishes a real simulated round and opens its result view for UI inspection without saving scores.
+
+## Keys
+
+| Keys | |
+|---|---|
+| <kbd>Q</kbd> <kbd>E</kbd> | Left / right flipper |
+| <kbd>Space</kbd> | Hold to charge, release to launch |
+| <kbd>N</kbd> | Nudge |
+| <kbd>P</kbd> | Pause |
+| <kbd>R</kbd> | Another round |
+| <kbd>F</kbd> | Toggle effects |
+| <kbd>M</kbd> | Mute audio |
+| <kbd>Tab</kbd> | Full play view |
+| <kbd>Esc</kbd> | Back to machine select |
+| <kbd>[</kbd> <kbd>]</kbd> | Cycle maps |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> | Command palette |
 
 ---
 
